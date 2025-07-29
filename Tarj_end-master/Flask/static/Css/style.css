@@ -1,0 +1,210 @@
+/* Importa a fonte 'Inter' do Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
+/* --- VARIÁVEIS DE DESIGN (PALETA E ESTILOS) --- */
+:root {
+    --cor-laranja-sp: #F36C00;
+    --cor-cinza-chumbo: #343A40;
+    --cor-cinza-claro: #F8F9FA;
+    --cor-branco: #FFFFFF;
+    --sombra-card: 0px 8px 25px rgba(0, 0, 0, 0.05);
+    --sombra-card-hover: 0px 12px 30px rgba(0, 0, 0, 0.08);
+    --raio-borda: 16px; /* Cantos bem arredondados */
+}
+
+/* --- ESTILOS GLOBAIS --- */
+body {
+    background-color: var(--cor-cinza-claro);
+    font-family: 'Inter', sans-serif;
+    color: var(--cor-cinza-chumbo);
+}
+
+/* --- ESTILOS PARA O BREADCRUMB CLICÁVEL --- */
+
+/* --- ESTILOS ADICIONAIS PARA A NAVBAR --- */
+
+/* Ajusta o espaçamento do nome ao lado do logo */
+.navbar-brand span {
+    font-weight: 600;
+    color: var(--cor-cinza-chumbo);
+    font-size: 1rem;
+}
+
+/* Estiliza os links da navegação */
+.nav-link {
+    color: #6C757D;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+.nav-link:hover {
+    color: var(--cor-laranja-sp);
+}
+
+/* Botão principal de acesso */
+.btn-primary {
+    background-color: var(--cor-laranja-sp);
+    border-color: var(--cor-laranja-sp);
+    font-weight: 600;
+}
+.btn-primary:hover {
+    background-color: #E65A00; /* Laranja um pouco mais escuro */
+    border-color: #E65A00;
+}
+
+
+/* Estilos da nova Barra de Contexto (Sub-header) */
+.sub-navbar {
+    background-color: #f1f3f5; /* Um cinza um pouco diferente do fundo */
+    padding: 0.6rem 0;
+    font-size: 0.8rem; /* Fonte menor para dar hierarquia */
+    color: #6C757D;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.sub-navbar .fw-bold {
+    color: var(--cor-cinza-chumbo); /* Destaca a página atual */
+}
+
+/* 2. Seção de Título (Hero) */
+.hero-section {
+    padding: 6rem 0; /* Espaçamento vertical generoso */
+}
+
+.hero-section h1 {
+    font-weight: 600; /* Título em negrito */
+    color: var(--cor-cinza-chumbo);
+    font-size: 70px;
+}
+
+.hero-section .lead {
+    color: #6C757D; /* Um cinza um pouco mais claro para o subtítulo */
+    max-width: 600px;
+    margin: 1rem auto 0 auto; /* Centraliza o parágrafo */
+}
+
+/* 3. Grade de Ferramentas (Cards) */
+.tools-section {
+    padding-bottom: 5rem;
+}
+
+.tool-card {
+    background-color: var(--cor-branco);
+    border-radius: var(--raio-borda);
+    padding: 2.5rem 2rem;
+    text-align: center;
+    border: 1px solid #E9ECEF;
+    box-shadow: var(--sombra-card);
+    transition: all 0.3s ease; /* A MÁGICA DA ANIMAÇÃO! */
+    height: 100%; /* Garante que todos os cards na mesma linha tenham a mesma altura */
+}
+/* O EFEITO HOVER */
+.tool-card:hover {
+    transform: translateY(-8px); /* Levanta o card */
+    box-shadow: var(--sombra-card-hover); /* Aumenta a sombra */
+    border-color: var(--cor-laranja-sp);
+}
+
+.tool-card .icon-container {
+    margin-bottom: 1.5rem;
+}
+
+.tool-card .icon-container i {
+    font-size: 3rem; /* Tamanho grande para o ícone */
+    color: var(--cor-laranja-sp);
+}
+
+.tool-card h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--cor-cinza-chumbo);
+}
+
+.tool-card p {
+    color: #6C757D;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+/* Rodapé */
+footer {
+    color: #6C757D;
+    font-size: 0.9rem;
+}
+/* --- ESTILOS PARA O BREADCRUMB CLICÁVEL --- */
+
+/* Estiliza os links dentro da sub-navbar */
+.sub-navbar a {
+    color: inherit; /* Herda a cor cinza do elemento pai */
+    text-decoration: none; /* Remove o sublinhado padrão */
+    transition: color 0.2s ease-in-out; /* Adiciona uma transição suave */
+}
+
+/* Efeito ao passar o mouse: o link fica laranja */
+.sub-navbar a:hover {
+    color: var(--cor-laranja-sp); /* Usa a variável de cor laranja que já definimos */
+    text-decoration: underline; /* Opcional: adiciona sublinhado no hover */
+} 
+/* ======== ESTILOS PARA A TABELA DE HISTÓRICO ======== */
+
+.tabela-container {
+  margin-top: 40px;
+  background-color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  overflow: hidden; /* Garante que as bordas arredondadas funcionem na tabela */
+}
+
+.tabela-historico {
+  width: 100%;
+  border-collapse: collapse; /* Remove o espaço entre as células */
+}
+
+.tabela-historico th,
+.tabela-historico td {
+  padding: 15px 20px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.tabela-historico th {
+  background-color: #f8f9fa;
+  font-weight: bold;
+  color: #333;
+}
+
+/* Estilo para as linhas pares, para melhor leitura */
+.tabela-historico tbody tr:nth-child(even) {
+  background-color: #f8f9fa;
+}
+
+/* Estilo para as tags de ação */
+.tag-upload, .tag-download {
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+  color: white;
+}
+
+.tag-upload {
+  background-color: #007bff; /* Azul */
+}
+
+.tag-download {
+  background-color: #28a745; /* Verde */
+}
+
+/* Estilo para o botão de download dentro da tabela */
+.btn-baixar {
+  background-color: #6c757d; /* Cinza */
+  color: white;
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: background-color 0.3s ease;
+}
+
+.btn-baixar:hover {
+  background-color: #5a6268;
+}

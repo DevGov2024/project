@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Pré-visualização PDF</title>
+</head>
+<body>
+    <h1>Pré-visualização de Itens Sensíveis no PDF</h1>
+    <form method="POST" action="/aplicar_tarjas_pdf">
+        {% for item in ocorrencias %}
+            <div>
+                <input type="checkbox" name="selecionados" value="{{ item.id }}" checked>
+                <strong>{{ item.tipo }}</strong> — "{{ item.texto }}" (Página {{ item.pagina + 1 }})
+            </div>
+        {% endfor %}
+        <br>
+        <button type="submit">Aplicar Tarjas</button>
+    </form>
+
+    <h2>Conteúdo extraído do PDF:</h2>
+    <pre>{{ texto }}</pre>
+</body>
+</html>

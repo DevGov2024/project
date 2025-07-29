@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Pré-visualização</title>
+</head>
+<body>
+  <h1>Pré-visualização do conteúdo</h1>
+
+  <h2>Texto original:</h2>
+  <pre style="background:#eee; padding:10px; border:1px solid #ccc; white-space:pre-wrap;">
+{{ conteudo }}
+  </pre>
+
+  <h2>Informações detectadas:</h2>
+  <form method="POST" action="{{ url_for('aplicar_tarjas') }}">
+    {% for item in ocorrencias %}
+      <div>
+        <input type="checkbox" name="selecionados" value="{{ item.id }}" checked>
+        <strong>[{{ item.tipo }}]</strong> {{ item.texto }}
+      </div>
+    {% endfor %}
+    <br>
+    <button type="submit">Aplicar Tarjas e Baixar</button>
+  </form>
+</body>
+</html>

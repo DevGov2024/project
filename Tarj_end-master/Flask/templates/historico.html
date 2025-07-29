@@ -1,0 +1,19 @@
+<h2>Histórico de Envios</h2>
+<table class="table">
+  <thead>
+    <tr>
+      <th>Nome</th>
+      <th>Tipo</th>
+      <th>Data/Hora</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in historico %}
+      <tr>
+        <td>{{ item.nome }}</td>
+        <td>{{ item.tipo }}</td>
+        <td>{{ item.data }}</td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
