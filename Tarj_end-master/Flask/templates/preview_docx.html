@@ -1,0 +1,18 @@
+<h2>Pré-visualização com tarjamento</h2>
+<form method="POST" action="{{ url_for('aplicar_tarjas_docx') }}">
+    {% for item in ocorrencias %}
+        <div>
+            <label>
+                <input type="checkbox" name="selecionados" value="{{ item.id }}" checked>
+                [{{ item.tipo }}] "{{ item.texto }}" no parágrafo {{ item.paragrafo + 1 }}
+            </label>
+        </div>
+    {% endfor %}
+
+    <h3>Texto original:</h3>
+    {% for p in paragrafos %}
+        <p>{{ p }}</p>
+    {% endfor %}
+
+    <button type="submit">Aplicar Tarjas e Fazer Download</button>
+</form>

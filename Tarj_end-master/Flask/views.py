@@ -8,6 +8,7 @@ from docx import Document
 import io
 from historico_utils import salvar_envio
 import uuid
+import base64
 
 
 
@@ -68,33 +69,84 @@ PADROES_SENSIVEIS = {
     "DATA": r'\b\d{2}/\d{2}/\d{4}\b'
 }
 
-@app.route('/tarjar', methods=['GET', 'POST'])
-def tarjar_docx():
+@app.route('/tarjar_docx', methods=['GET', 'POST'])
+def tarjar_docx_preview():
     if request.method == 'POST':
-        arquivo = request.files['docxfile']
+        arquivo = request.files.get("docxfile")
         selecionados = request.form.getlist("itens")
 
         if not arquivo or not arquivo.filename.endswith('.docx'):
             return "Arquivo inválido. Envie um .docx.", 400
 
         padroes_ativos = {k: v for k, v in PADROES_SENSIVEIS.items() if k in selecionados}
-        original_doc = Document(arquivo)
-        novo_doc = copiar_e_tarjar(original_doc, padroes_ativos)
 
-        mem_file = io.BytesIO()
-        novo_doc.save(mem_file)
-        mem_file.seek(0)
+        conteudo_bytes = arquivo.read()
+        file_stream = io.BytesIO(conteudo_bytes)
+        doc = Document(file_stream)
 
-        return send_file(
-            mem_file,
-            as_attachment=True,
-            download_name="documento_tarjado.docx",
-            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        )
+        ocorrencias = []
+        for i, par in enumerate(doc.paragraphs):
+            texto = par.text
+            for tipo, regex in padroes_ativos.items():
+                for m in re.finditer(regex, texto):
+                    ocorrencias.append({
+                        "tipo": tipo,
+                        "texto": m.group(),
+                        "paragrafo": i,
+                        "start": m.start(),
+                        "end": m.end(),
+                        "id": f"{i}_{m.start()}_{m.end()}"
+                    })
+
+        # Salvar o arquivo em disco temporariamente
+        temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".docx").name
+        with open(temp_path, "wb") as f:
+            f.write(conteudo_bytes)
+
+        # Guardar só o caminho e as ocorrências na sessão
+        session['doc_ocorrencias'] = ocorrencias
+        session['doc_path'] = temp_path
+
+        return render_template("preview_docx.html", ocorrencias=ocorrencias, paragrafos=[p.text for p in doc.paragraphs])
 
     return render_template("tarjar_docx.html", padroes=PADROES_SENSIVEIS.keys())
 
 
+@app.route("/aplicar_tarjas_docx", methods=["POST"])
+def aplicar_tarjas_docx():
+    selecionados = request.form.getlist("selecionados")
+    ocorrencias = session.get("doc_ocorrencias", [])
+    caminho = session.get("doc_path", None)
+
+    if not caminho or not os.path.exists(caminho):
+        return "Erro: Arquivo temporário não encontrado.", 400
+
+    doc = Document(caminho)
+
+    for item in ocorrencias:
+        if item["id"] in selecionados:
+            par_index = item["paragrafo"]
+            texto = doc.paragraphs[par_index].text
+
+            antes = texto[:item["start"]]
+            depois = texto[item["end"]:]
+            novo_texto = antes + f"[TARJADO-{item['tipo']}]" + depois
+
+            doc.paragraphs[par_index].text = novo_texto
+
+    mem_file = io.BytesIO()
+    doc.save(mem_file)
+    mem_file.seek(0)
+
+    # (Opcional) deletar arquivo temporário
+    os.remove(caminho)
+
+    return send_file(
+        mem_file,
+        as_attachment=True,
+        download_name="documento_tarjado.docx",
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
 
 
 # Padrões para tarjamento
@@ -123,13 +175,16 @@ def aplicar_tarjas_em_pdf(doc, padroes):
                 for area in areas:
                     pagina.add_redact_annot(area, fill=(0, 0, 0))
         pagina.apply_redactions()
-    return doc
+    return doc 
+
+
+
 
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
 def tarjar_pdf():
     if request.method == 'POST':
-        arquivo = request.files['pdffile']
-        selecionados = request.form.getlist("itens")
+        arquivo = request.files.get('pdffile')
+        selecionados = request.form.getlist('itens')
 
         if not arquivo or not arquivo.filename.endswith('.pdf'):
             return "Arquivo inválido. Envie um .pdf.", 400
@@ -138,7 +193,6 @@ def tarjar_pdf():
 
         pdf_bytes = arquivo.read()
         doc = fitz.open("pdf", pdf_bytes)
-
         aplicar_tarjas_em_pdf(doc, padroes_ativos)
 
         mem_file = io.BytesIO()
@@ -146,14 +200,32 @@ def tarjar_pdf():
         mem_file.seek(0)
         doc.close()
 
-        return send_file(
-            mem_file,
-            as_attachment=True,
-            download_name="documento_tarjado.pdf",
-            mimetype="application/pdf"
-        )
+        # Salvar o PDF em arquivo temporário
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        temp_file.write(mem_file.read())
+        temp_file.close()
 
-    return render_template("tarjar_pdf.html", padroes=PADROES_SENSIVEIS_PDF.keys())
+        # Guardar caminho do arquivo temporário na sessão
+        session['pdf_tarjado_path'] = temp_file.name
+
+        # Ler conteúdo para base64 só para o preview (pode ser feito no template com URL também)
+        with open(temp_file.name, 'rb') as f:
+            pdf_b64 = base64.b64encode(f.read()).decode('utf-8')
+
+        return render_template('preview_pdf.html', pdf_data=pdf_b64)
+
+    return render_template('tarjar_pdf.html', padroes=PADROES_SENSIVEIS_PDF.keys())
+
+
+@app.route('/download_pdf_tarjado')
+def download_pdf_tarjado():
+    path = session.get('pdf_tarjado_path', None)
+    if not path or not os.path.exists(path):
+        return "Nenhum PDF tarjado disponível.", 400
+
+    return send_file(path, as_attachment=True, download_name="documento_tarjado.pdf", mimetype="application/pdf")
+
+
 
 
 
