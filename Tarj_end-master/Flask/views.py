@@ -9,8 +9,7 @@ import io
 from historico_utils import salvar_envio
 import uuid
 import base64
-
-
+from pdf2image import convert_from_bytes
 
 
 
@@ -38,10 +37,6 @@ def homepage():
      return render_template("index.html")
     
 
-
-
-
-
 def copiar_e_tarjar(original_doc, padroes):
     novo_doc = Document()
 
@@ -53,8 +48,6 @@ def copiar_e_tarjar(original_doc, padroes):
         novo_doc.add_paragraph(texto)
 
     return novo_doc
-
-
 
 # Padrões para DOCX
 PADROES_SENSIVEIS = {
@@ -165,6 +158,7 @@ PADROES_SENSIVEIS_PDF = {
    
 }
 
+
 def aplicar_tarjas_em_pdf(doc, padroes):
     for pagina in doc:
         texto = pagina.get_text("text")
@@ -176,9 +170,6 @@ def aplicar_tarjas_em_pdf(doc, padroes):
                     pagina.add_redact_annot(area, fill=(0, 0, 0))
         pagina.apply_redactions()
     return doc 
-
-
-
 
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
 def tarjar_pdf():
@@ -224,7 +215,6 @@ def download_pdf_tarjado():
         return "Nenhum PDF tarjado disponível.", 400
 
     return send_file(path, as_attachment=True, download_name="documento_tarjado.pdf", mimetype="application/pdf")
-
 
 
 
