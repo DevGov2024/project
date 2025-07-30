@@ -10,7 +10,8 @@ from historico_utils import salvar_envio
 import uuid
 import base64
 from pdf2image import convert_from_bytes
-
+import pytesseract
+from PIL import Image, ImageDraw
 
 
 # Habilita sessão para guardar dados temporários
@@ -148,13 +149,12 @@ PADROES_SENSIVEIS_PDF = {
     "RG": r'\b\d{1,2}\.?\d{3}\.?\d{3}-?\d{1}\b',
     "EMAIL": r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b',
     "TELEFONE": r'\(?\d{2}\)?\s?\d{4,5}-\d{4}',
-    "CEP": r'\b\d{5}-\d{3}\b',
     "CNPJ": r'\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b',
     "CARTAO": r'(?:\d[ -]*?){13,16}',
     "PLACA": r'\b[A-Z]{3}-?\d{1}[A-Z0-9]{1}\d{2}\b',
     "DATA": r'\b\d{2}/\d{2}/\d{4}\b',
-    "CEP": r"\b\d{5}-\d{3}\b",
-   "endereço": r"\b(?:Rua|Av|Avenida|Travessa|Estrada|Rodovia|R\.|Av\.?)\.?\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9\s]+,\s*\d+"
+    "CEP": r'\d{5}-\d{3}',
+    "endereço": r"\b(?:Rua|Av|Avenida|Travessa|Estrada|Rodovia|R\.|Av\.?)\.?\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9\s]+,\s*\d+"
    
 }
 
@@ -196,10 +196,10 @@ def tarjar_pdf():
         temp_file.write(mem_file.read())
         temp_file.close()
 
-        # Guardar caminho do arquivo temporário na sessão
+       
         session['pdf_tarjado_path'] = temp_file.name
 
-        # Ler conteúdo para base64 só para o preview (pode ser feito no template com URL também)
+        
         with open(temp_file.name, 'rb') as f:
             pdf_b64 = base64.b64encode(f.read()).decode('utf-8')
 
@@ -270,3 +270,64 @@ def aplicar_tarjas_txt():
     temp_file.close()
 
     return send_file(temp_file.name, as_attachment=True, download_name="arquivo_tarjado.txt")
+
+
+
+
+
+
+#Função ainda indiponível
+os.environ['TESSDATA_PREFIX'] = r"C:\Program Files\Tesseract-OCR"
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+@app.route('/tarjar_pdf_ocr', methods=['GET', 'POST'])
+def tarjar_pdf_ocr():
+    if request.method == 'POST':
+        arquivo = request.files.get('pdffile')
+        selecionados = request.form.getlist('itens')
+
+        if not arquivo or not arquivo.filename.endswith('.pdf'):
+            return "Arquivo inválido. Envie um .pdf.", 400
+
+        padroes_ativos = {k: v for k, v in PADROES_SENSIVEIS_PDF.items() if k in selecionados}
+        poppler_path = r"C:\Program Files\Release-24.08.0-0\poppler-24.08.0\Library\bin"
+
+        # Converte PDF em imagens
+        imagens = convert_from_bytes(arquivo.read(), poppler_path=poppler_path)
+
+        imagens_tarjadas = []
+
+        for img in imagens:
+            texto = pytesseract.image_to_string(img, lang='por')
+
+            # Copia da imagem para desenhar
+            draw_img = img.copy()
+            draw = ImageDraw.Draw(draw_img)
+
+            # Dados com posição
+            data = pytesseract.image_to_data(img, lang='por', output_type=pytesseract.Output.DICT)
+
+            for tipo, regex in padroes_ativos.items():
+                matches = re.finditer(regex, texto)
+                for match in matches:
+                    termo = match.group()
+                    # Tenta encontrar o termo nas palavras detectadas
+                    for i, word in enumerate(data['text']):
+                        if word and termo.startswith(word):
+                            x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+                            draw.rectangle([x, y, x + w, y + h], fill='black')
+
+            imagens_tarjadas.append(draw_img)
+
+        # Salva como novo PDF
+        temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        imagens_tarjadas[0].save(temp_pdf.name, save_all=True, append_images=imagens_tarjadas[1:])
+
+        session['pdf_tarjado_path'] = temp_pdf.name
+
+        with open(temp_pdf.name, 'rb') as f:
+            pdf_b64 = base64.b64encode(f.read()).decode('utf-8')
+
+        return render_template('revisar_termos.html', pdf_data=pdf_b64)
+
+    return render_template('tarjar_pdf_ocr.html', padroes=PADROES_SENSIVEIS_PDF.keys())
