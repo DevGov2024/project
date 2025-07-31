@@ -164,53 +164,79 @@ PADROES_SENSIVEIS_PDF = {
 }
 
 
-def aplicar_tarjas_em_pdf(doc, padroes):
-    for pagina in doc:
-        texto = pagina.get_text("text")
-        for nome, regex in padroes.items():
-            for match in re.finditer(regex, texto):
-                termo = match.group()
-                areas = pagina.search_for(termo)
-                for area in areas:
-                    pagina.add_redact_annot(area, fill=(0, 0, 0))
-        pagina.apply_redactions()
-    return doc 
-
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
 def tarjar_pdf():
     if request.method == 'POST':
         arquivo = request.files.get('pdffile')
-        selecionados = request.form.getlist('itens')
 
         if not arquivo or not arquivo.filename.endswith('.pdf'):
             return "Arquivo inválido. Envie um .pdf.", 400
 
-        padroes_ativos = {k: v for k, v in PADROES_SENSIVEIS_PDF.items() if k in selecionados}
-
         pdf_bytes = arquivo.read()
         doc = fitz.open("pdf", pdf_bytes)
-        aplicar_tarjas_em_pdf(doc, padroes_ativos)
 
-        mem_file = io.BytesIO()
-        doc.save(mem_file)
-        mem_file.seek(0)
-        doc.close()
+        ocorrencias = []
+        for pagina_num in range(len(doc)):
+            pagina = doc[pagina_num]
+            texto = pagina.get_text("text")
+            for tipo, regex in PADROES_SENSIVEIS_PDF.items():
+                for m in re.finditer(regex, texto):
+                    ocorrencias.append({
+                        "id": f"{pagina_num}_{m.start()}_{m.end()}",
+                        "tipo": tipo,
+                        "texto": m.group(),
+                        "pagina": pagina_num,
+                        "start": m.start(),
+                        "end": m.end()
+                    })
 
-        # Salvar o PDF em arquivo temporário
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-        temp_file.write(mem_file.read())
-        temp_file.close()
+        # Salva caminho temporário para depois aplicar as tarjas
+        temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
+        with open(temp_path, 'wb') as f:
+            f.write(pdf_bytes)
 
-       
-        session['pdf_tarjado_path'] = temp_file.name
+        session['pdf_path'] = temp_path
+        session['pdf_ocorrencias'] = ocorrencias
 
-        
-        with open(temp_file.name, 'rb') as f:
-            pdf_b64 = base64.b64encode(f.read()).decode('utf-8')
+        pdf_b64 = base64.b64encode(pdf_bytes).decode('utf-8')
 
-        return render_template('preview_pdf.html', pdf_data=pdf_b64)
+        return render_template("preview_pdf.html", ocorrencias=ocorrencias, pdf_data=pdf_b64)
 
     return render_template('tarjar_pdf.html', padroes=PADROES_SENSIVEIS_PDF.keys())
+@app.route('/aplicar_tarjas_pdf', methods=['POST'])
+def aplicar_tarjas_pdf():
+    selecionados = request.form.getlist('selecionados')
+    caminho = session.get('pdf_path')
+    ocorrencias = session.get('pdf_ocorrencias', [])
+
+    if not caminho or not os.path.exists(caminho):
+        return "Erro: Arquivo temporário não encontrado.", 400
+
+    doc = fitz.open(caminho)
+
+    for item in ocorrencias:
+        if item['id'] in selecionados:
+            pagina = doc[item['pagina']]
+            termo = item['texto']
+            areas = pagina.search_for(termo)
+            for area in areas:
+                pagina.add_redact_annot(area, fill=(0, 0, 0))
+            pagina.apply_redactions()
+
+    mem_file = io.BytesIO()
+    doc.save(mem_file)
+    mem_file.seek(0)
+    doc.close()
+
+    # Remover arquivo temporário
+    os.remove(caminho)
+
+    return send_file(
+        mem_file,
+        as_attachment=True,
+        download_name="documento_tarjado.pdf",
+        mimetype="application/pdf"
+    )
 
 
 @app.route('/download_pdf_tarjado')
@@ -220,8 +246,6 @@ def download_pdf_tarjado():
         return "Nenhum PDF tarjado disponível.", 400
 
     return send_file(path, as_attachment=True, download_name="documento_tarjado.pdf", mimetype="application/pdf")
-
-
 
 
 
