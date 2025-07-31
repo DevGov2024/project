@@ -9,6 +9,7 @@ import io
 from historico_utils import salvar_envio
 import uuid
 import base64
+from docx.shared import RGBColor
 
 from PIL import Image, ImageDraw
 
@@ -91,12 +92,10 @@ def tarjar_docx_preview():
                         "id": f"{i}_{m.start()}_{m.end()}"
                     })
 
-        # Salvar o arquivo em disco temporariamente
         temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".docx").name
         with open(temp_path, "wb") as f:
             f.write(conteudo_bytes)
 
-        # Guardar só o caminho e as ocorrências na sessão
         session['doc_ocorrencias'] = ocorrencias
         session['doc_path'] = temp_path
 
@@ -119,19 +118,24 @@ def aplicar_tarjas_docx():
     for item in ocorrencias:
         if item["id"] in selecionados:
             par_index = item["paragrafo"]
-            texto = doc.paragraphs[par_index].text
+            par = doc.paragraphs[par_index]
+            texto = par.text
 
-            antes = texto[:item["start"]]
-            depois = texto[item["end"]:]
-            novo_texto = antes + f"[TARJADO-{item['tipo']}]" + depois
+            start, end = item["start"], item["end"]
+            substituto = "█" * (end - start)
 
-            doc.paragraphs[par_index].text = novo_texto
+            # Reconstruir o parágrafo com substituição
+            novo_texto = texto[:start] + substituto + texto[end:]
+            par.clear()  # Remove o conteúdo atual
+
+            # Adiciona novo run com formatação
+            run = par.add_run(novo_texto)
+            run.font.color.rgb = RGBColor(0, 0, 0)  # fonte preta
 
     mem_file = io.BytesIO()
     doc.save(mem_file)
     mem_file.seek(0)
 
-    # (Opcional) deletar arquivo temporário
     os.remove(caminho)
 
     return send_file(
@@ -140,7 +144,6 @@ def aplicar_tarjas_docx():
         download_name="documento_tarjado.docx",
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
-
 
 # Padrões para tarjamento
 PADROES_SENSIVEIS_PDF = {
@@ -252,6 +255,8 @@ def tarjar_txt_preview():
 
     return render_template("tarjar_txt.html", padroes=PADROES_SENSIVEIS.keys())
 
+
+
 @app.route("/aplicar_tarjas_txt", methods=["POST"])
 def aplicar_tarjas_txt():
     conteudo = session.get("conteudo", "")
@@ -263,7 +268,8 @@ def aplicar_tarjas_txt():
         if f"{item['start']}_{item['end']}" in selecionados:
             inicio = item["start"] + deslocamento
             fim = item["end"] + deslocamento
-            substituto = f"[TARJADO-{item['tipo']}]"
+            comprimento = fim - inicio
+            substituto = "█" * comprimento
             conteudo = conteudo[:inicio] + substituto + conteudo[fim:]
             deslocamento += len(substituto) - (fim - inicio)
 
@@ -272,9 +278,6 @@ def aplicar_tarjas_txt():
     temp_file.close()
 
     return send_file(temp_file.name, as_attachment=True, download_name="arquivo_tarjado.txt")
-
-
-
 
 
 
