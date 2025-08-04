@@ -19,9 +19,14 @@
 
           <div class="mb-3">
             <label class="form-label">Selecionar dados sensíveis a serem tarjados:</label>
+              <!-- Checkbox Mestre -->
+            <div class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" id="checkAll" checked>
+                <label class="form-check-label fw-bold" for="checkAll">Selecionar/Desmarcar todos</label>
+            </div>
             {% for chave in padroes %}
               <div class="form-check">
-                <input class="form-check-input" type="checkbox" name="itens" value="{{ chave }}" id="chk{{ loop.index }}" checked>
+                <input class="form-check-input item-checkbox" type="checkbox" name="itens" value="{{ chave }}" id="chk{{ loop.index }}" checked>
                 <label class="form-check-label" for="chk{{ loop.index }}">{{ chave }}</label>
               </div>
             {% endfor %}

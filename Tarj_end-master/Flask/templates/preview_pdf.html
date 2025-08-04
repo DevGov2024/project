@@ -3,47 +3,105 @@
 {% block title %}Página Inicial - STGC{% endblock %}
 
 {% block content %}
+<div class="row justify-content-center">
+    <section class="col-md-10">
+        <div class="bg-white p-4 rounded-3 shadow-sm">
+            <h3 class="mb-3"><i class="bi bi-patch-check-fill text-success"></i> Documento Tarjado com Sucesso!</h3>
+            <p class="text-muted">Abaixo está a pré-visualização do seu documento com as tarjas aplicadas. Você pode ajustar as tarjas antes de baixar.</p>
+            <hr>
 
+            <!-- PDF embutido -->
+            <div class="border rounded-3 mb-4" style="height: 700px;">
+                <embed src="data:application/pdf;base64,{{ pdf_data }}" type="application/pdf" width="100%" height="100%" />
+            </div>
 
-    <div class="row justify-content-center">
-        <section class="col-md-10">
-            <div class="bg-white p-4 rounded-3 shadow-sm">
-                <h3 class="mb-3"><i class="bi bi-patch-check-fill text-success"></i> Documento Tarjado com Sucesso!
-                    </h3>
-                    <p class="text-muted">Abaixo está a pré-visualização do seu documento com as tarjas aplicadas. Você
-                        pode ajustar as tarjas antes de baixar.</p>
-                    <hr>
+            <!-- Início do formulário -->
+            <form method="post" action="{{ url_for('aplicar_tarjas_pdf') }}">
+                <!-- Campo oculto para trechos manuais -->
+                <input type="hidden" name="tarjas_manualmente_adicionadas" id="manualTarjasHidden">
 
-                <!-- Preview do PDF original -->
-                <div class="border rounded-3 mb-4" style="height: 700px;">
-                    <embed src="data:application/pdf;base64,{{ pdf_data }}" type="application/pdf" width="100%" height="100%" />
+                <!-- Campo para adicionar tarjas manuais -->
+                <div class="mb-3">
+                    <label for="trechoManual" class="form-label">Inserir trecho manual:</label>
+                    <div class="input-group">
+                        <input type="text" id="trechoManual" class="form-control" placeholder="Cole aqui o trecho que deseja ocultar">
+                        <button type="button" class="btn btn-outline-secondary" onclick="adicionarTarjaManual()">➕ Adicionar</button>
+                    </div>
+                    <small class="form-text text-muted">Você pode adicionar vários trechos, um de cada vez.</small>
                 </div>
 
-                <form method="post" action="{{ url_for('aplicar_tarjas_pdf') }}">
-                    <h4 class="mb-3">Dados encontrados:</h4>
-                    <div class="mb-4">
-                        {% for item in ocorrencias %}
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="selecionados" value="{{ item.id }}" id="chk{{ loop.index }}" checked>
-                                <label class="form-check-label" for="chk{{ loop.index }}">
-                                    {{ item.tipo }}: "{{ item.texto }}" (Página {{ item.pagina + 1 }})
-                                </label>
-                            </div>
-                        {% endfor %}
+                <!-- Lista visual dos trechos manuais -->
+                <ul id="listaTarjas" class="list-group mb-4"></ul>
+
+                <h4 class="mb-3">Dados encontrados:</h4>
+                <div class="mb-4">
+                    <!-- Checkbox Mestre -->
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" id="checkAll" checked>
+                        <label class="form-check-label fw-bold" for="checkAll">Selecionar/Desmarcar todos</label>
                     </div>
+                    {% for item in ocorrencias %}
+                        <div class="form-check">
+                            <input class="form-check-input item-checkbox" type="checkbox" name="selecionados" value="{{ item.id }}" id="chk{{ loop.index }}" checked>
+                            <label class="form-check-label" for="chk{{ loop.index }}">
+                                {{ item.tipo }}: "{{ item.texto }}" (Página {{ item.pagina + 1 }})
+                            </label>
+                        </div>
+                    {% endfor %}
+                </div>
+                <hr>
+                
+                <div class="d-flex justify-content-center align-items-center mt-4">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-shield-fill-x me-2"></i>Aplicar Tarjas e Fazer Download
+                    </button>
+                    <a href="{{ url_for('tarjar_pdf') }}" class="btn btn-secondary btn-lg">
+                        <i class="bi bi-download me-2"></i>Cancelar Solicitação
+                    </a>
+                </div>
+            </form>
+        </div>
+    </section>
+</div>
 
-                    <div class="d-flex justify-content-center align-items-center mt-4">
-                        <button type="submit" class="btn btn-primary">
-                            <i class="bi bi-shield-fill-x me-2"></i>Aplicar Tarjas e Fazer Download
-                        </button>
-                        <a href="{{ url_for('tarjar_pdf') }}" class="btn btn-secondary btn-lg">
-                            <i class="bi bi-download me-2"></i>Cancelar Solicitação
-                        </a>
-                    </div>
-                </form>
-            </div>
-        </section>
-    </div>
+<!-- Script para adicionar e visualizar tarjas manuais -->
+<script>
+    let tarjasManuais = [];
 
+    function adicionarTarjaManual() {
+        const input = document.getElementById("trechoManual");
+        const valor = input.value.trim();
+        if (valor.length === 0) {
+            alert("Insira um trecho antes de adicionar.");
+            return;
+        }
 
+        tarjasManuais.push(valor);
+        document.getElementById("manualTarjasHidden").value = tarjasManuais.join("|");
+
+        // Atualiza lista visual
+        const li = document.createElement("li");
+        li.className = "list-group-item d-flex justify-content-between align-items-center";
+        li.textContent = valor;
+
+        const btnRemover = document.createElement("button");
+        btnRemover.textContent = "Remover";
+        btnRemover.className = "btn btn-sm btn-outline-danger ms-2";
+        btnRemover.onclick = function () {
+            tarjasManuais = tarjasManuais.filter(t => t !== valor);
+            document.getElementById("manualTarjasHidden").value = tarjasManuais.join("|");
+            li.remove();
+        };
+
+        li.appendChild(btnRemover);
+        document.getElementById("listaTarjas").appendChild(li);
+
+        input.value = ""; // limpa o campo
+    }
+
+    document.getElementById("checkAll").addEventListener("change", function () {
+        const checkboxes = document.querySelectorAll(".item-checkbox");
+        checkboxes.forEach(cb => cb.checked = this.checked);
+    });
+</script>
 {% endblock %}

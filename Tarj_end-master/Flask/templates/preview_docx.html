@@ -16,11 +16,17 @@
 
                     <!-- Início do formulário de revisão de tarjamento -->
                     <form method="POST" action="{{ url_for('aplicar_tarjas_docx') }}" class="text-start">
+
                         <h4 class="mb-3">Dados encontrados:</h4>
                         <div class="mb-4">
+                              <!-- Checkbox Mestre -->
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="checkAll" checked>
+                            <label class="form-check-label fw-bold" for="checkAll">Selecionar/Desmarcar todos</label>
+                        </div>
                             {% for item in ocorrencias %}
                             <div class="form-check">
-                                <input class="form-check-input" type="checkbox" name="selecionados"
+                                <input class="form-check-input item-checkbox" type="checkbox" name="selecionados"
                                     value="{{ item.id }}" id="item{{ item.id }}" checked>
                                 <label class="form-check-label" for="item{{ item.id }}">
                                     [{{ item.tipo }}] "{{ item.texto }}" no parágrafo {{ item.paragrafo + 1 }}
@@ -31,6 +37,11 @@
 
                         <h4 class="mb-2">Texto Original:</h4>
                         <div class="border p-3 rounded bg-light" style="max-height: 400px; overflow-y: auto;">
+                        <!-- Campo oculto para trechos manuais -->
+                        <input type="hidden" name="tarjas_manualmente_adicionadas" id="manualTarjasHidden">
+
+                        <!-- Botão que adiciona o texto selecionado -->
+                        <button type="button" class="btn btn-outline-secondary my-2" onclick="adicionarSelecaoComoTarja()">➕ Adicionar Seleção como Tarja</button>
                             {% for p in paragrafos %}
                             <p>{{ p }}</p>
                             {% endfor %}
@@ -42,9 +53,24 @@
                         </button>
 
                             <a href="{{ url_for('homepage') }}" class="btn btn-secondary btn-lg">
-                               <i class="bi bi-house-door-fill me-2"></i>   Cancelar Solicitação
+                               <i class="bi bi-house-door-fill me-2"></i> Cancelar Solicitação
                             </a>
                         </div>
+                        <script>
+                        let tarjasManuais = [];
+
+                        function adicionarSelecaoComoTarja() {
+                            const selecionado = window.getSelection().toString().trim();
+                            if (selecionado.length === 0) {
+                                alert("Selecione um trecho de texto com o mouse para adicionar como tarja.");
+                                return;
+                            }
+
+                            tarjasManuais.push(selecionado);
+                            document.getElementById("manualTarjasHidden").value = tarjasManuais.join("|");
+                            alert(`Trecho selecionado "${selecionado}" adicionado para tarjamento.`);
+                        }
+                    </script>
                     </form>
                     <!-- Fim do formulário -->
                 </div>

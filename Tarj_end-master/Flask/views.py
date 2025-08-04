@@ -107,6 +107,9 @@ def tarjar_docx_preview():
 @app.route("/aplicar_tarjas_docx", methods=["POST"])
 def aplicar_tarjas_docx():
     selecionados = request.form.getlist("selecionados")
+    trechos_manuais_raw = request.form.get("tarjas_manualmente_adicionadas", "")
+    trechos_manuais = [t.strip() for t in trechos_manuais_raw.split("|") if t.strip()]
+
     ocorrencias = session.get("doc_ocorrencias", [])
     caminho = session.get("doc_path", None)
 
@@ -115,27 +118,42 @@ def aplicar_tarjas_docx():
 
     doc = Document(caminho)
 
+    # Cria mapa de parágrafos para aplicar substituições
+    paragrafo_edits = {}
+
+    # Primeiro, aplica as substituições dos checkboxes
     for item in ocorrencias:
         if item["id"] in selecionados:
-            par_index = item["paragrafo"]
-            par = doc.paragraphs[par_index]
-            texto = par.text
+            idx = item["paragrafo"]
+            texto_original = doc.paragraphs[idx].text
+            if idx not in paragrafo_edits:
+                paragrafo_edits[idx] = texto_original
 
             start, end = item["start"], item["end"]
-            substituto = "█" * (end - start)
+            trecho = texto_original[start:end]
+            texto_editado = paragrafo_edits[idx].replace(trecho, "█" * len(trecho), 1)
+            paragrafo_edits[idx] = texto_editado
 
-            # Reconstruir o parágrafo com substituição
-            novo_texto = texto[:start] + substituto + texto[end:]
-            par.clear()  # Remove o conteúdo atual
+    # Agora aplica os trechos manuais
+    if trechos_manuais:
+        for i, par in enumerate(doc.paragraphs):
+            texto = paragrafo_edits.get(i, par.text)
+            for trecho_manual in trechos_manuais:
+                if trecho_manual in texto:
+                    texto = texto.replace(trecho_manual, "█" * len(trecho_manual))
+                    paragrafo_edits[i] = texto
 
-            # Adiciona novo run com formatação
-            run = par.add_run(novo_texto)
-            run.font.color.rgb = RGBColor(0, 0, 0)  # fonte preta
+    # Atualiza os parágrafos editados
+    for i, novo_texto in paragrafo_edits.items():
+        par = doc.paragraphs[i]
+        par.clear()
+        run = par.add_run(novo_texto)
+        run.font.color.rgb = RGBColor(0, 0, 0)
 
+    # Salva em memória
     mem_file = io.BytesIO()
     doc.save(mem_file)
     mem_file.seek(0)
-
     os.remove(caminho)
 
     return send_file(
@@ -144,6 +162,7 @@ def aplicar_tarjas_docx():
         download_name="documento_tarjado.docx",
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+
 
 # Padrões para tarjamento
 PADROES_SENSIVEIS_PDF = {
@@ -159,9 +178,6 @@ PADROES_SENSIVEIS_PDF = {
     "DATA": r'\b\d{2}/\d{2}/\d{4}\b',
     "ENDERECO": r"\b(?:Rua|Av|Avenida|Travessa|Estrada|Rodovia|R\.|Av\.?)\.?\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9\s]+,\s*\d+",
     "NOME": r'\b([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+(?:\s+(?:da|de|do|dos|das|e)?\s*[A-Z][a-z]+)+)\b',
-
-
-   
 }
 
 
@@ -207,6 +223,9 @@ def tarjar_pdf():
 @app.route('/aplicar_tarjas_pdf', methods=['POST'])
 def aplicar_tarjas_pdf():
     selecionados = request.form.getlist('selecionados')
+    trechos_manuais_raw = request.form.get('tarjas_manualmente_adicionadas', '')
+    trechos_manuais = [t.strip() for t in trechos_manuais_raw.split('|') if t.strip()]
+
     caminho = session.get('pdf_path')
     ocorrencias = session.get('pdf_ocorrencias', [])
 
@@ -215,6 +234,7 @@ def aplicar_tarjas_pdf():
 
     doc = fitz.open(caminho)
 
+    # Aplicar tarjas automáticas (checkboxes)
     for item in ocorrencias:
         if item['id'] in selecionados:
             pagina = doc[item['pagina']]
@@ -224,12 +244,24 @@ def aplicar_tarjas_pdf():
                 pagina.add_redact_annot(area, fill=(0, 0, 0))
             pagina.apply_redactions()
 
+    # Aplicar tarjas manuais (seleção do usuário)
+    if trechos_manuais:
+        for num_pagina in range(len(doc)):
+            pagina = doc[num_pagina]
+            texto_pagina = pagina.get_text()
+            for trecho in trechos_manuais:
+                if trecho in texto_pagina:
+                    areas = pagina.search_for(trecho)
+                    for area in areas:
+                        pagina.add_redact_annot(area, fill=(0, 0, 0))
+                    pagina.apply_redactions()
+
     mem_file = io.BytesIO()
     doc.save(mem_file)
     mem_file.seek(0)
     doc.close()
 
-    # Remover arquivo temporário
+    # Remove arquivo temporário
     os.remove(caminho)
 
     return send_file(
@@ -237,6 +269,33 @@ def aplicar_tarjas_pdf():
         as_attachment=True,
         download_name="documento_tarjado.pdf",
         mimetype="application/pdf"
+    )
+
+@app.route('/preview_pdf', methods=['POST'])
+def preview_pdf():
+    arquivo = request.files['arquivo']
+    nome_temporario = os.path.join('uploads', f"{uuid.uuid4()}.pdf")
+    arquivo.save(nome_temporario)
+
+    doc = fitz.open(nome_temporario)
+
+    pdf_data = base64.b64encode(open(nome_temporario, "rb").read()).decode('utf-8')
+
+    ocorrencias = detectar_dados(doc)  # sua função atual
+    texto_extraido = ""
+    for pagina in doc:
+        texto_extraido += pagina.get_text() + "\n"
+
+    doc.close()
+
+    session['pdf_path'] = nome_temporario
+    session['pdf_ocorrencias'] = ocorrencias
+
+    return render_template(
+        "preview_pdf.html",
+        pdf_data=pdf_data,
+        ocorrencias=ocorrencias,
+        texto_extraido=texto_extraido
     )
 
 

@@ -145,7 +145,29 @@
             Copyright © Prefeitura de São Paulo - SEGES/COTIC 2025
         </div>
     </footer>
+        <script>
+            document.addEventListener("DOMContentLoaded", function () {
+                const checkAllBox = document.getElementById("checkAll");
+                const itemCheckboxes = document.querySelectorAll(".item-checkbox");
 
-</body>
+                if (checkAllBox && itemCheckboxes.length > 0) {
+                checkAllBox.addEventListener("change", function () {
+                    itemCheckboxes.forEach(function (cb) {
+                    cb.checked = checkAllBox.checked;
+                    });
+                });
 
+                itemCheckboxes.forEach(function (cb) {
+                    cb.addEventListener("change", function () {
+                    if (!cb.checked) {
+                        checkAllBox.checked = false;
+                    } else if ([...itemCheckboxes].every(i => i.checked)) {
+                        checkAllBox.checked = true;
+                    }
+                    });
+                });
+                }
+            });
+        </script>
+    </body>
 </html>
