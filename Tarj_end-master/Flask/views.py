@@ -28,7 +28,7 @@ padroes = {
     "Cartão de Crédito": r"\b(?:\d[ -]*?){13,16}\b",
     "RG": r"\b\d{2}\.\d{3}\.\d{3}-\d{1}\b",
     "Passaporte": r"\b[A-Z]{1}\d{7}\b",
-    "endereço" : r"(\d+)\s+([A-Za-z\s]+),\s*([A-Za-z\s]+)(?:,\s*(.*))?"
+    "Endereço" : r"(\d+)\s+([A-Za-z\s]+),\s*([A-Za-z\s]+)(?:,\s*(.*))?"
 }
 
 
@@ -170,14 +170,11 @@ PADROES_SENSIVEIS_PDF = {
     "RG": r'\b\d{1,2}\.?\d{3}\.?\d{3}-?\d{1}\b',
     "EMAIL": r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b',
     "TELEFONE": r'\(?\d{2}\)?\s?\d{4,5}-\d{4}',
-     "CEP": r'\b(?:\d{5}|\d{2}\.?\d{3})-\d{3}\b',
-
+    "CEP": r'\b(?:\d{5}|\d{2}\.?\d{3})-\d{3}\b',
     "CNPJ": r'\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b',
     "CARTAO": r'(?:\d[ -]*?){13,16}',
     "PLACA": r'\b[A-Z]{3}-?\d{1}[A-Z0-9]{1}\d{2}\b',
     "DATA": r'\b\d{2}/\d{2}/\d{4}\b',
-    "ENDERECO": r"\b(?:Rua|Av|Avenida|Travessa|Estrada|Rodovia|R\.|Av\.?)\.?\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9\s]+,\s*\d+",
-    "NOME": r'\b([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+(?:\s+(?:da|de|do|dos|das|e)?\s*[A-Z][a-z]+)+)\b',
 }
 
 
@@ -220,6 +217,7 @@ def tarjar_pdf():
         return render_template("preview_pdf.html", ocorrencias=ocorrencias, pdf_data=pdf_b64)
 
     return render_template('tarjar_pdf.html', padroes=PADROES_SENSIVEIS_PDF.keys())
+    
 @app.route('/aplicar_tarjas_pdf', methods=['POST'])
 def aplicar_tarjas_pdf():
     selecionados = request.form.getlist('selecionados')
@@ -298,7 +296,6 @@ def preview_pdf():
         texto_extraido=texto_extraido
     )
 
-
 @app.route('/download_pdf_tarjado')
 def download_pdf_tarjado():
     path = session.get('pdf_tarjado_path', None)
@@ -306,63 +303,3 @@ def download_pdf_tarjado():
         return "Nenhum PDF tarjado disponível.", 400
 
     return send_file(path, as_attachment=True, download_name="documento_tarjado.pdf", mimetype="application/pdf")
-
-
-
-@app.route("/tarjar_txt", methods=["GET", "POST"])
-def tarjar_txt_preview():
-    if request.method == "POST":
-        arquivo = request.files.get("txtfile")
-        selecionados = request.form.getlist("itens")
-
-        if not arquivo or not arquivo.filename.endswith(".txt"):
-            return "Arquivo inválido. Envie um .txt.", 400
-
-        conteudo = arquivo.read().decode("utf-8")
-        padroes_ativos = {k: v for k, v in PADROES_SENSIVEIS.items() if k in selecionados}
-
-        ocorrencias = []
-        for tipo, regex in padroes_ativos.items():
-            for m in re.finditer(regex, conteudo):
-                ocorrencias.append({
-                    "tipo": tipo,
-                    "texto": m.group(),
-                    "start": m.start(),
-                    "end": m.end(),
-                    "id": f"{m.start()}_{m.end()}"
-                })
-
-        session["conteudo"] = conteudo
-        session["ocorrencias"] = ocorrencias
-
-        return render_template("preview_txt.html", conteudo=conteudo, ocorrencias=ocorrencias)
-
-    return render_template("tarjar_txt.html", padroes=PADROES_SENSIVEIS.keys())
-
-
-
-@app.route("/aplicar_tarjas_txt", methods=["POST"])
-def aplicar_tarjas_txt():
-    conteudo = session.get("conteudo", "")
-    ocorrencias = session.get("ocorrencias", [])
-    selecionados = request.form.getlist("selecionados")
-
-    deslocamento = 0
-    for item in ocorrencias:
-        if f"{item['start']}_{item['end']}" in selecionados:
-            inicio = item["start"] + deslocamento
-            fim = item["end"] + deslocamento
-            comprimento = fim - inicio
-            substituto = "█" * comprimento
-            conteudo = conteudo[:inicio] + substituto + conteudo[fim:]
-            deslocamento += len(substituto) - (fim - inicio)
-
-    temp_file = tempfile.NamedTemporaryFile(delete=False, mode="w+", encoding="utf-8", suffix="_tarjado.txt")
-    temp_file.write(conteudo)
-    temp_file.close()
-
-    return send_file(temp_file.name, as_attachment=True, download_name="arquivo_tarjado.txt")
-
-
-
-#Função ainda indiponível
