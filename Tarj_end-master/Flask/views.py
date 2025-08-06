@@ -18,8 +18,6 @@ from PIL import Image, ImageDraw
 app.secret_key = "segredo-muito-seguro"
 
 
-
-
 PADROES_SENSIVEIS = {
     "CPF": r'\b\d{3}\.\d{3}\.\d{3}-\d{2}\b',
     "RG": r'\b\d{1,2}\.?\d{3}\.?\d{3}-?\d{1}\b',
@@ -56,8 +54,6 @@ def copiar_e_tarjar(original_doc, padroes):
     return novo_doc
 
 # Padrões para DOCX
-
-
 
 @app.route('/tarjar_docx', methods=['GET', 'POST'])
 def tarjar_docx_preview():
@@ -160,12 +156,6 @@ def aplicar_tarjas_docx():
     )
 
 
-# Padrões para tarjamento
-
-
-
-
-
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
 def tarjar_pdf():
     if request.method == 'POST':
@@ -181,21 +171,44 @@ def tarjar_pdf():
         doc = fitz.open("pdf", pdf_bytes)
 
         ocorrencias = []
+        redactions_por_pagina = {}
+
         for pagina_num in range(len(doc)):
             pagina = doc[pagina_num]
             texto = pagina.get_text("text")
+
             for tipo, regex in padroes_filtrados.items():
                 for m in re.finditer(regex, texto):
+                    termo = m.group()
                     ocorrencias.append({
                         "id": f"{pagina_num}_{m.start()}_{m.end()}",
                         "tipo": tipo,
-                        "texto": m.group(),
+                        "texto": termo,
                         "pagina": pagina_num,
                         "start": m.start(),
                         "end": m.end()
                     })
 
-        # Salvar PDF temporário
+                    areas = pagina.search_for(termo)
+                    for area in areas:
+                        redactions_por_pagina.setdefault(pagina_num, []).append(area)
+
+        # Aplicar redactions (apenas para visualização)
+        for pagina_idx, areas in redactions_por_pagina.items():
+            pagina = doc[pagina_idx]
+            for area in areas:
+                pagina.add_redact_annot(area, fill=(0, 0, 0))
+            pagina.apply_redactions()
+
+        # Salvar o PDF modificado em memória
+        mem_file = io.BytesIO()
+        doc.save(mem_file)
+        mem_file.seek(0)
+        doc.close()
+
+        pdf_b64 = base64.b64encode(mem_file.read()).decode('utf-8')
+
+        # Ainda salvamos o original temporariamente, caso o usuário queira aplicar tarjas reais depois
         temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
         with open(temp_path, 'wb') as f:
             f.write(pdf_bytes)
@@ -203,20 +216,14 @@ def tarjar_pdf():
         session['pdf_path'] = temp_path
         session['pdf_ocorrencias'] = ocorrencias
 
-        pdf_b64 = base64.b64encode(pdf_bytes).decode('utf-8')
-
         return render_template("preview_pdf.html", ocorrencias=ocorrencias, pdf_data=pdf_b64)
-
 
     return render_template('tarjar_pdf.html', padroes=PADROES_SENSIVEIS.keys())
     
 
-
-
-
-
 @app.route('/aplicar_tarjas_pdf', methods=['POST'])
 def aplicar_tarjas_pdf():
+
     selecionados = request.form.getlist('selecionados')
     trechos_manuais_raw = request.form.get('tarjas_manualmente_adicionadas', '')
     trechos_manuais = [t.strip() for t in trechos_manuais_raw.split('|') if t.strip()]
@@ -225,7 +232,7 @@ def aplicar_tarjas_pdf():
     ocorrencias = session.get('pdf_ocorrencias', [])
 
     if not caminho or not os.path.exists(caminho):
-        return "Erro: Arquivo temporário não encontrado.", 400
+        return "Erro: Muitos dados para processar. Tente com menos dados para tarjar", 400
 
     doc = fitz.open(caminho)
 
