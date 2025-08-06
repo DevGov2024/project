@@ -11,6 +11,9 @@ import uuid
 import base64
 from docx.shared import RGBColor
 
+from pdf2image import convert_from_bytes
+import pytesseract
+
 from PIL import Image, ImageDraw
 
 
@@ -71,19 +74,38 @@ def tarjar_docx_preview():
         doc = Document(file_stream)
 
         ocorrencias = []
+        paragrafos_com_tarja = []
+
         for i, par in enumerate(doc.paragraphs):
             texto = par.text
+            texto_tarjado = texto  # manter original para sobrescrever com tarjas
+            offset = 0  # controle de deslocamento conforme o texto é alterado
+
             for tipo, regex in padroes_ativos.items():
                 for m in re.finditer(regex, texto):
+                    encontrado = m.group()
+                    inicio = m.start() + offset
+                    fim = m.end() + offset
+                    tarja = '█' * len(encontrado)
+                    texto_tarjado = (
+                        texto_tarjado[:inicio] + tarja + texto_tarjado[fim:]
+                    )
+
+                    # Atualiza o offset após substituir
+                    offset += len(tarja) - len(encontrado)
+
                     ocorrencias.append({
                         "tipo": tipo,
-                        "texto": m.group(),
+                        "texto": encontrado,
                         "paragrafo": i,
                         "start": m.start(),
                         "end": m.end(),
                         "id": f"{i}_{m.start()}_{m.end()}"
                     })
 
+            paragrafos_com_tarja.append(texto_tarjado)
+
+        # Salva cópia temporária do original para edição posterior
         temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".docx").name
         with open(temp_path, "wb") as f:
             f.write(conteudo_bytes)
@@ -91,10 +113,9 @@ def tarjar_docx_preview():
         session['doc_ocorrencias'] = ocorrencias
         session['doc_path'] = temp_path
 
-        return render_template("preview_docx.html", ocorrencias=ocorrencias, paragrafos=[p.text for p in doc.paragraphs])
+        return render_template("preview_docx.html", ocorrencias=ocorrencias, paragrafos=paragrafos_com_tarja)
 
     return render_template("tarjar_docx.html", padroes=PADROES_SENSIVEIS.keys())
-
 
 @app.route("/aplicar_tarjas_docx", methods=["POST"])
 def aplicar_tarjas_docx():
@@ -317,3 +338,61 @@ def download_pdf_tarjado():
         return "Nenhum PDF tarjado disponível.", 400
 
     return send_file(path, as_attachment=True, download_name="documento_tarjado.pdf", mimetype="application/pdf")
+
+
+@app.route('/tarjar_ocr_pdf', methods=['GET', 'POST'])
+def tarjar_ocr_pdf():
+    if request.method == 'POST':
+        arquivo = request.files.get('ocrpdf')
+        tipos_selecionados = request.form.getlist('tipos')  
+
+        if not arquivo or not arquivo.filename.endswith('.pdf'):
+            return "Arquivo inválido. Envie um .pdf escaneado.", 400
+
+        padroes_ativos = {k: v for k, v in PADROES_SENSIVEIS.items() if k in tipos_selecionados}
+
+        pdf_bytes = arquivo.read()
+
+        # Converte páginas do PDF escaneado em imagens
+        imagens = convert_from_bytes(pdf_bytes)
+
+        imagens_tarjadas = []
+        todas_ocorrencias = []
+
+        for idx, imagem in enumerate(imagens):
+            texto_ocr = pytesseract.image_to_string(imagem, lang='por')  # OCR do texto
+            dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
+
+            draw = ImageDraw.Draw(imagem)
+            largura, altura = imagem.size
+
+            # Detectar dados sensíveis no texto extraído
+            for tipo, regex in padroes_ativos.items():
+                for i, palavra in enumerate(dados_ocr['text']):
+                    if re.fullmatch(regex, palavra):
+                        x = int(dados_ocr['left'][i])
+                        y = int(dados_ocr['top'][i])
+                        w = int(dados_ocr['width'][i])
+                        h = int(dados_ocr['height'][i])
+                        draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+
+                        todas_ocorrencias.append({
+                            "pagina": idx,
+                            "tipo": tipo,
+                            "texto": palavra
+                        })
+
+            imagens_tarjadas.append(imagem)
+
+        # Salva imagens modificadas de volta como PDF
+        pdf_tarjado = io.BytesIO()
+        imagens_tarjadas[0].save(pdf_tarjado, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
+        pdf_tarjado.seek(0)
+
+        session['ocr_pdf_tarjado'] = base64.b64encode(pdf_tarjado.read()).decode('utf-8')
+        session['ocr_ocorrencias'] = todas_ocorrencias
+
+        return render_template("preview_ocr.html", ocorrencias=todas_ocorrencias, pdf_b64=session['ocr_pdf_tarjado'])
+
+    return render_template('tarjar_ocr_pdf.html', padroes=PADROES_SENSIVEIS.keys())
+
