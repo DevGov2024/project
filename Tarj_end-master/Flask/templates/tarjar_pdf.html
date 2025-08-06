@@ -26,7 +26,7 @@
             </div>
             {% for chave in padroes %}
               <div class="form-check">
-                <input class="form-check-input item-checkbox" type="checkbox" name="itens" value="{{ chave }}" id="chk{{ loop.index }}" checked>
+                <input class="form-check-input item-checkbox" type="checkbox" name="tipos" value="{{ chave }}" id="chk{{ loop.index }}" checked>
                 <label class="form-check-label" for="chk{{ loop.index }}">{{ chave }}</label>
               </div>
             {% endfor %}

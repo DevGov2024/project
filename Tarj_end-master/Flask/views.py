@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw
 # Habilita sessão para guardar dados temporários
 app.secret_key = "segredo-muito-seguro"
 
+<<<<<<< Updated upstream
 padroes = {
     "CPF": r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b",
     "CNPJ": r"\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b",
@@ -29,7 +30,23 @@ padroes = {
     "RG": r"\b\d{2}\.\d{3}\.\d{3}-\d{1}\b",
     "Passaporte": r"\b[A-Z]{1}\d{7}\b",
     "Endereço" : r"(\d+)\s+([A-Za-z\s]+),\s*([A-Za-z\s]+)(?:,\s*(.*))?"
+=======
+
+PADROES_SENSIVEIS = {
+    "CPF": r'\b\d{3}\.\d{3}\.\d{3}-\d{2}\b',
+    "RG": r'\b\d{1,2}\.?\d{3}\.?\d{3}-?\d{1}\b',
+    "EMAIL": r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b',
+    "TELEFONE": r'\(?\d{2}\)?\s?\d{4,5}-\d{4}',
+     "CEP": r'\b(?:\d{5}|\d{2}\.?\d{3})-\d{3}\b',
+    "CNPJ": r'\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b',
+    "CARTAO": r'(?:\d[ -]*?){13,16}',
+    "PLACA": r'\b[A-Z]{3}-?\d{1}[A-Z0-9]{1}\d{2}\b',
+    "DATA": r'\b\d{2}/\d{2}/\d{4}\b',
+    "ENDERECO": r"\b(?:Rua|Av|Avenida|Travessa|Estrada|Rodovia|R\.|Av\.?)\.?\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9\s]+,\s*\d+",
+    "NOME": r'\b([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+(?:\s+(?:da|de|do|dos|das|e)?\s*[A-Z][a-z]+)+)\b',
+>>>>>>> Stashed changes
 }
+
 
 
 @app.route("/",  methods=["GET", "POST"])
@@ -51,17 +68,8 @@ def copiar_e_tarjar(original_doc, padroes):
     return novo_doc
 
 # Padrões para DOCX
-PADROES_SENSIVEIS = {
-    "CPF": r'\b\d{3}\.\d{3}\.\d{3}-\d{2}\b',
-    "RG": r'\b\d{1,2}\.?\d{3}\.?\d{3}-?\d{1}\b',
-    "EMAIL": r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b',
-    "TELEFONE": r'\(?\d{2}\)?\s?\d{4,5}-\d{4}',
-    "CEP": r'\b\d{5}-\d{3}\b',
-    "CNPJ": r'\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b',
-    "CARTAO": r'(?:\d[ -]*?){13,16}',
-    "PLACA": r'\b[A-Z]{3}-?\d{1}[A-Z0-9]{1}\d{2}\b',
-    "DATA": r'\b\d{2}/\d{2}/\d{4}\b'
-}
+
+
 
 @app.route('/tarjar_docx', methods=['GET', 'POST'])
 def tarjar_docx_preview():
@@ -165,6 +173,7 @@ def aplicar_tarjas_docx():
 
 
 # Padrões para tarjamento
+<<<<<<< Updated upstream
 PADROES_SENSIVEIS_PDF = {
     "CPF": r'\b\d{3}\.\d{3}\.\d{3}-\d{2}\b',
     "RG": r'\b\d{1,2}\.?\d{3}\.?\d{3}-?\d{1}\b',
@@ -176,15 +185,21 @@ PADROES_SENSIVEIS_PDF = {
     "PLACA": r'\b[A-Z]{3}-?\d{1}[A-Z0-9]{1}\d{2}\b',
     "DATA": r'\b\d{2}/\d{2}/\d{4}\b',
 }
+=======
+
+>>>>>>> Stashed changes
 
 
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
 def tarjar_pdf():
     if request.method == 'POST':
         arquivo = request.files.get('pdffile')
+        tipos_selecionados = request.form.getlist('tipos')  
 
         if not arquivo or not arquivo.filename.endswith('.pdf'):
             return "Arquivo inválido. Envie um .pdf.", 400
+
+        padroes_filtrados = {k: v for k, v in PADROES_SENSIVEIS.items() if k in tipos_selecionados}
 
         pdf_bytes = arquivo.read()
         doc = fitz.open("pdf", pdf_bytes)
@@ -193,7 +208,7 @@ def tarjar_pdf():
         for pagina_num in range(len(doc)):
             pagina = doc[pagina_num]
             texto = pagina.get_text("text")
-            for tipo, regex in PADROES_SENSIVEIS_PDF.items():
+            for tipo, regex in padroes_filtrados.items():
                 for m in re.finditer(regex, texto):
                     ocorrencias.append({
                         "id": f"{pagina_num}_{m.start()}_{m.end()}",
@@ -204,7 +219,7 @@ def tarjar_pdf():
                         "end": m.end()
                     })
 
-        # Salva caminho temporário para depois aplicar as tarjas
+        # Salvar PDF temporário
         temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
         with open(temp_path, 'wb') as f:
             f.write(pdf_bytes)
@@ -216,8 +231,14 @@ def tarjar_pdf():
 
         return render_template("preview_pdf.html", ocorrencias=ocorrencias, pdf_data=pdf_b64)
 
+<<<<<<< Updated upstream
     return render_template('tarjar_pdf.html', padroes=PADROES_SENSIVEIS_PDF.keys())
     
+=======
+    return render_template('tarjar_pdf.html', padroes=PADROES_SENSIVEIS.keys())
+
+
+>>>>>>> Stashed changes
 @app.route('/aplicar_tarjas_pdf', methods=['POST'])
 def aplicar_tarjas_pdf():
     selecionados = request.form.getlist('selecionados')
@@ -232,17 +253,22 @@ def aplicar_tarjas_pdf():
 
     doc = fitz.open(caminho)
 
-    # Aplicar tarjas automáticas (checkboxes)
+    redactions_por_pagina = {}
+
+    # Redações automáticas
     for item in ocorrencias:
         if item['id'] in selecionados:
-            pagina = doc[item['pagina']]
+            pagina_idx = item['pagina']
             termo = item['texto']
+            pagina = doc[pagina_idx]
+
+            # Busca por áreas correspondentes ao termo
             areas = pagina.search_for(termo)
             for area in areas:
-                pagina.add_redact_annot(area, fill=(0, 0, 0))
-            pagina.apply_redactions()
+                # Verifica se essa página já tem lista de redactions
+                redactions_por_pagina.setdefault(pagina_idx, []).append(area)
 
-    # Aplicar tarjas manuais (seleção do usuário)
+    # Redações manuais
     if trechos_manuais:
         for num_pagina in range(len(doc)):
             pagina = doc[num_pagina]
@@ -251,15 +277,20 @@ def aplicar_tarjas_pdf():
                 if trecho in texto_pagina:
                     areas = pagina.search_for(trecho)
                     for area in areas:
-                        pagina.add_redact_annot(area, fill=(0, 0, 0))
-                    pagina.apply_redactions()
+                        redactions_por_pagina.setdefault(num_pagina, []).append(area)
 
+    # Aplicar redactions por página (depois de acumular todos)
+    for pagina_idx, areas in redactions_por_pagina.items():
+        pagina = doc[pagina_idx]
+        for area in areas:
+            pagina.add_redact_annot(area, fill=(0, 0, 0))
+        pagina.apply_redactions()  # Só uma vez por página!
+
+    # Salvar PDF final
     mem_file = io.BytesIO()
     doc.save(mem_file)
     mem_file.seek(0)
     doc.close()
-
-    # Remove arquivo temporário
     os.remove(caminho)
 
     return send_file(
