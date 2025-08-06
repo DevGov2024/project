@@ -17,20 +17,8 @@ from PIL import Image, ImageDraw
 # Habilita sessão para guardar dados temporários
 app.secret_key = "segredo-muito-seguro"
 
-<<<<<<< Updated upstream
-padroes = {
-    "CPF": r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b",
-    "CNPJ": r"\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b",
-    "Telefone": r"\b\(?\d{2}\)?\s?\d{4,5}-\d{4}\b",
-    "E-mail": r"\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b",
-    "Senha": r"\bsenha\s*[:=]?\s*\S+",
-    "Processo CNJ": r"\b\d{7}-\d{2}\.\d{4}\.\d{1}\.\d{2}\.\d{4}\b",
-    "CEP": r"\b\d{5}-\d{3}\b",
-    "Cartão de Crédito": r"\b(?:\d[ -]*?){13,16}\b",
-    "RG": r"\b\d{2}\.\d{3}\.\d{3}-\d{1}\b",
-    "Passaporte": r"\b[A-Z]{1}\d{7}\b",
-    "Endereço" : r"(\d+)\s+([A-Za-z\s]+),\s*([A-Za-z\s]+)(?:,\s*(.*))?"
-=======
+
+
 
 PADROES_SENSIVEIS = {
     "CPF": r'\b\d{3}\.\d{3}\.\d{3}-\d{2}\b',
@@ -44,7 +32,7 @@ PADROES_SENSIVEIS = {
     "DATA": r'\b\d{2}/\d{2}/\d{4}\b',
     "ENDERECO": r"\b(?:Rua|Av|Avenida|Travessa|Estrada|Rodovia|R\.|Av\.?)\.?\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9\s]+,\s*\d+",
     "NOME": r'\b([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+(?:\s+(?:da|de|do|dos|das|e)?\s*[A-Z][a-z]+)+)\b',
->>>>>>> Stashed changes
+
 }
 
 
@@ -173,21 +161,9 @@ def aplicar_tarjas_docx():
 
 
 # Padrões para tarjamento
-<<<<<<< Updated upstream
-PADROES_SENSIVEIS_PDF = {
-    "CPF": r'\b\d{3}\.\d{3}\.\d{3}-\d{2}\b',
-    "RG": r'\b\d{1,2}\.?\d{3}\.?\d{3}-?\d{1}\b',
-    "EMAIL": r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b',
-    "TELEFONE": r'\(?\d{2}\)?\s?\d{4,5}-\d{4}',
-    "CEP": r'\b(?:\d{5}|\d{2}\.?\d{3})-\d{3}\b',
-    "CNPJ": r'\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b',
-    "CARTAO": r'(?:\d[ -]*?){13,16}',
-    "PLACA": r'\b[A-Z]{3}-?\d{1}[A-Z0-9]{1}\d{2}\b',
-    "DATA": r'\b\d{2}/\d{2}/\d{4}\b',
-}
-=======
 
->>>>>>> Stashed changes
+
+
 
 
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
@@ -231,14 +207,14 @@ def tarjar_pdf():
 
         return render_template("preview_pdf.html", ocorrencias=ocorrencias, pdf_data=pdf_b64)
 
-<<<<<<< Updated upstream
-    return render_template('tarjar_pdf.html', padroes=PADROES_SENSIVEIS_PDF.keys())
-    
-=======
+
     return render_template('tarjar_pdf.html', padroes=PADROES_SENSIVEIS.keys())
+    
 
 
->>>>>>> Stashed changes
+
+
+
 @app.route('/aplicar_tarjas_pdf', methods=['POST'])
 def aplicar_tarjas_pdf():
     selecionados = request.form.getlist('selecionados')
