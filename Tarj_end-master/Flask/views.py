@@ -360,13 +360,9 @@ def tarjar_ocr_pdf():
         todas_ocorrencias = []
 
         for idx, imagem in enumerate(imagens):
-            texto_ocr = pytesseract.image_to_string(imagem, lang='por')  # OCR do texto
             dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
-
             draw = ImageDraw.Draw(imagem)
-            largura, altura = imagem.size
 
-            # Detectar dados sensíveis no texto extraído
             for tipo, regex in padroes_ativos.items():
                 for i, palavra in enumerate(dados_ocr['text']):
                     if re.fullmatch(regex, palavra):
@@ -384,15 +380,52 @@ def tarjar_ocr_pdf():
 
             imagens_tarjadas.append(imagem)
 
-        # Salva imagens modificadas de volta como PDF
+        # Converte imagens modificadas em PDF
         pdf_tarjado = io.BytesIO()
         imagens_tarjadas[0].save(pdf_tarjado, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
         pdf_tarjado.seek(0)
 
-        session['ocr_pdf_tarjado'] = base64.b64encode(pdf_tarjado.read()).decode('utf-8')
+        # Caminho absoluto para salvar PDF
+        diretorio_temp = os.path.join(app.root_path, 'arquivos_temp')
+        os.makedirs(diretorio_temp, exist_ok=True)
+
+        nome_arquivo = f"{uuid.uuid4()}.pdf"
+        caminho_arquivo = os.path.join(diretorio_temp, nome_arquivo)
+
+        with open(caminho_arquivo, 'wb') as f:
+            f.write(pdf_tarjado.read())
+
+        # Reposiciona o ponteiro para ler de novo e converter para base64
+        pdf_tarjado.seek(0)
+        pdf_base64 = base64.b64encode(pdf_tarjado.read()).decode('utf-8')
+
+        # Salva em sessão
+        session['ocr_pdf_path'] = caminho_arquivo
         session['ocr_ocorrencias'] = todas_ocorrencias
 
-        return render_template("preview_ocr.html", ocorrencias=todas_ocorrencias, pdf_b64=session['ocr_pdf_tarjado'])
+        return render_template(
+            "preview_ocr.html",
+            ocorrencias=todas_ocorrencias,
+            pdf_b64=pdf_base64  # <-- agora está correto
+        )
 
     return render_template('tarjar_ocr_pdf.html', padroes=PADROES_SENSIVEIS.keys())
 
+
+@app.route('/download_pdf_ocr')
+def download_pdf_ocr():
+    caminho = session.get('ocr_pdf_path')
+
+    if not caminho or not os.path.exists(caminho):
+        return "Arquivo não encontrado.", 404
+
+    return send_file(caminho, as_attachment=True, download_name="pdf_tarjado_ocr.pdf")
+
+
+@app.route('/ver_pdf_ocr')
+def ver_pdf_ocr():
+    caminho = session.get('ocr_pdf_path')
+    if not caminho or not os.path.exists(caminho):
+        return "Arquivo não encontrado.", 404
+
+    return send_file(caminho, mimetype='application/pdf')

@@ -1,48 +1,39 @@
 {% extends "base.html" %}
-
-{% block title %}Pré-visualização OCR - STGC{% endblock %}
-
+{% block title %}Pré-visualização PDF OCR Tarjado{% endblock %}
 {% block content %}
+<div class="container my-5">
+  <h3 class="mb-4">
+    <i class="bi bi-eye-fill text-primary"></i> Pré-visualização do PDF com Tarjas (OCR)
+  </h3>
 
-<div class="row justify-content-center">
-  <section class="col-md-10">
-    <div class="bg-white p-4 rounded-3 shadow-sm">
+  <p>Os seguintes dados sensíveis foram encontrados e tarjados:</p>
 
-      <h3 class="mb-4 text-center">
-        <i class="bi bi-eye-fill text-primary me-2"></i>
-        Pré-visualização do PDF Tarjado (via OCR)
-      </h3>
+  <ul class="list-group mb-4">
+    {% for ocorrencia in ocorrencias %}
+    <li class="list-group-item">
+      <strong>Página:</strong> {{ ocorrencia.pagina + 1 }} —
+      <strong>Tipo:</strong> {{ ocorrencia.tipo }} —
+      <strong>Texto:</strong> {{ ocorrencia.texto }}
+    </li>
+    {% endfor %}
+  </ul>
 
-      <div class="mb-4">
-        <iframe src="data:application/pdf;base64,{{ pdf_b64 }}" width="100%" height="600px" style="border: 1px solid #ccc; border-radius: 8px;"></iframe>
-      </div>
+  <div class="mb-4">
+    <embed
+      src="{{ url_for('ver_pdf_ocr') }}"
+      type="application/pdf"
+      width="100%"
+      height="600px"
+    />
+  </div>
 
-      <h5 class="text-secondary mb-3">
-        <i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>
-        Ocorrências Detectadas
-      </h5>
-
-      {% if ocorrencias %}
-        <ul class="list-group">
-          {% for o in ocorrencias %}
-            <li class="list-group-item">
-              <strong>Página {{ o.pagina + 1 }}</strong> — 
-              <span class="text-muted">{{ o.tipo }}:</span> {{ o.texto }}
-            </li>
-          {% endfor %}
-        </ul>
-      {% else %}
-        <p class="text-muted">Nenhum dado sensível foi detectado com os critérios selecionados.</p>
-      {% endif %}
-
-      <div class="mt-4 d-flex justify-content-end">
-        <a href="{{ url_for('tarjar_ocr_pdf') }}" class="btn btn-secondary">
-          <i class="bi bi-arrow-left-circle me-2"></i>Voltar
-        </a>
-      </div>
-
-    </div>
-  </section>
+  <div class="d-flex justify-content-center gap-3">
+    <a href="{{ url_for('download_pdf_ocr') }}" class="btn btn-success">
+      <i class="bi bi-download"></i> Baixar PDF Tarjado
+    </a>
+    <a href="{{ url_for('tarjar_ocr_pdf') }}" class="btn btn-secondary">
+      <i class="bi bi-arrow-left"></i> Voltar
+    </a>
+  </div>
 </div>
-
 {% endblock %}
