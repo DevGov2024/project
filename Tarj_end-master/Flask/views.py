@@ -33,10 +33,7 @@ PADROES_SENSIVEIS = {
     "DATA": r'\b\d{2}/\d{2}/\d{4}\b',
     "ENDERECO": r"\b(?:Rua|Av|Avenida|Travessa|Estrada|Rodovia|R\.|Av\.?)\.?\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9\s]+,\s*\d+",
     "NOME": r'\b([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+(?:\s+(?:da|de|do|dos|das|e)?\s*[A-Z][a-z]+)+)\b',
-
 }
-
-
 
 @app.route("/",  methods=["GET", "POST"])
 def homepage():
