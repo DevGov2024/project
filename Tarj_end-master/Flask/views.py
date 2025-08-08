@@ -10,6 +10,7 @@ from historico_utils import salvar_envio
 import uuid
 import base64
 from docx.shared import RGBColor
+import json
 
 from pdf2image import convert_from_bytes
 import pytesseract
@@ -341,28 +342,45 @@ def download_pdf_tarjado():
 def tarjar_ocr_pdf():
     if request.method == 'POST':
         arquivo = request.files.get('ocrpdf')
-        tipos_selecionados = request.form.getlist('tipos')  
+        tipos_selecionados = request.form.getlist('tipos')
 
-        if not arquivo or not arquivo.filename.endswith('.pdf'):
-            return "Arquivo inválido. Envie um .pdf escaneado.", 400
+        if not arquivo or not arquivo.filename.lower().endswith('.pdf'):
+            return "Arquivo inválido. Envie um arquivo PDF escaneado.", 400
 
         padroes_ativos = {k: v for k, v in PADROES_SENSIVEIS.items() if k in tipos_selecionados}
 
-        pdf_bytes = arquivo.read()
-
-        # Converte páginas do PDF escaneado em imagens
-        imagens = convert_from_bytes(pdf_bytes)
+        try:
+            pdf_bytes = arquivo.read()
+            imagens = convert_from_bytes(pdf_bytes)
+        except Exception as e:
+            app.logger.error(f"Erro ao converter PDF em imagens: {e}")
+            return "Erro ao processar o arquivo PDF.", 500
 
         imagens_tarjadas = []
         todas_ocorrencias = []
 
-        for idx, imagem in enumerate(imagens):
+        # Primeiro cria cópia das imagens para manipular
+        for imagem in imagens:
+            imagens_tarjadas.append(imagem.copy())
+
+        # TARJAS AUTOMÁTICAS COM REGEX
+        for idx, imagem in enumerate(imagens_tarjadas):
             dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
             draw = ImageDraw.Draw(imagem)
 
             for tipo, regex in padroes_ativos.items():
+                try:
+                    pattern = re.compile(regex, re.IGNORECASE | re.UNICODE)
+                except re.error as e:
+                    app.logger.error(f"Regex inválido para tipo '{tipo}': {e}")
+                    continue
+
                 for i, palavra in enumerate(dados_ocr['text']):
-                    if re.fullmatch(regex, palavra):
+                    texto = (palavra or '').strip()
+                    if not texto:
+                        continue
+
+                    if pattern.search(texto):
                         x = int(dados_ocr['left'][i])
                         y = int(dados_ocr['top'][i])
                         w = int(dados_ocr['width'][i])
@@ -372,42 +390,89 @@ def tarjar_ocr_pdf():
                         todas_ocorrencias.append({
                             "pagina": idx,
                             "tipo": tipo,
+                            "texto": texto
+                        })
+
+        # --- BUSCA MANUAL POR TEXTO DIGITADO PELO USUÁRIO ---
+        texto_manual = request.form.get('texto_manual', '').strip()
+        if texto_manual:
+            texto_manual_lower = texto_manual.lower()
+            for idx, imagem in enumerate(imagens_tarjadas):
+                dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
+                draw = ImageDraw.Draw(imagem)
+
+                for i, palavra in enumerate(dados_ocr['text']):
+                    palavra_texto = (palavra or '').strip().lower()
+                    if texto_manual_lower in palavra_texto:
+                        x = int(dados_ocr['left'][i])
+                        y = int(dados_ocr['top'][i])
+                        w = int(dados_ocr['width'][i])
+                        h = int(dados_ocr['height'][i])
+                        draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+
+                        todas_ocorrencias.append({
+                            "pagina": idx,
+                            "tipo": "manual",
                             "texto": palavra
                         })
 
-            imagens_tarjadas.append(imagem)
+        # --- TARJAS MANUAIS (coordenadas) ---
+        tarjas_manuais_str = request.form.get('tarjas_manuais', '[]')
+        try:
+            tarjas_manuais = json.loads(tarjas_manuais_str)
+            if not isinstance(tarjas_manuais, list):
+                raise ValueError("tarjas_manuais não é uma lista")
+        except (json.JSONDecodeError, ValueError) as e:
+            app.logger.error(f"Erro ao ler tarjas manuais JSON: {e}")
+            tarjas_manuais = []
 
-        # Converte imagens modificadas em PDF
+        for tarja in tarjas_manuais:
+            pagina = tarja.get('pagina')
+            x = tarja.get('x')
+            y = tarja.get('y')
+            w = tarja.get('w')
+            h = tarja.get('h')
+
+            if (
+                isinstance(pagina, int) and 0 <= pagina < len(imagens_tarjadas) and
+                all(isinstance(coord, (int, float)) for coord in [x, y, w, h])
+            ):
+                draw = ImageDraw.Draw(imagens_tarjadas[pagina])
+                draw.rectangle([(int(x), int(y)), (int(x + w), int(y + h))], fill='black')
+            else:
+                app.logger.warning(f"Tarja manual inválida ignorada: {tarja}")
+
+        # --- FINALIZA PDF TARJADO ---
         pdf_tarjado = io.BytesIO()
-        imagens_tarjadas[0].save(pdf_tarjado, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
+        try:
+            imagens_tarjadas[0].save(pdf_tarjado, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
+        except Exception as e:
+            app.logger.error(f"Erro ao salvar PDF tarjado: {e}")
+            return "Erro ao gerar o PDF tarjado.", 500
+
         pdf_tarjado.seek(0)
 
-        # Caminho absoluto para salvar PDF
         diretorio_temp = os.path.join(app.root_path, 'arquivos_temp')
         os.makedirs(diretorio_temp, exist_ok=True)
-
         nome_arquivo = f"{uuid.uuid4()}.pdf"
         caminho_arquivo = os.path.join(diretorio_temp, nome_arquivo)
 
         with open(caminho_arquivo, 'wb') as f:
             f.write(pdf_tarjado.read())
 
-        # Reposiciona o ponteiro para ler de novo e converter para base64
         pdf_tarjado.seek(0)
         pdf_base64 = base64.b64encode(pdf_tarjado.read()).decode('utf-8')
 
-        # Salva em sessão
         session['ocr_pdf_path'] = caminho_arquivo
         session['ocr_ocorrencias'] = todas_ocorrencias
 
         return render_template(
             "preview_ocr.html",
             ocorrencias=todas_ocorrencias,
-            pdf_b64=pdf_base64  # <-- agora está correto
+            pdf_b64=pdf_base64
         )
 
     return render_template('tarjar_ocr_pdf.html', padroes=PADROES_SENSIVEIS.keys())
-
 
 @app.route('/download_pdf_ocr')
 def download_pdf_ocr():
