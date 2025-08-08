@@ -11,7 +11,7 @@ import uuid
 import base64
 from docx.shared import RGBColor
 import json
-
+from fuzzywuzzy import fuzz
 from pdf2image import convert_from_bytes
 import pytesseract
 
@@ -329,6 +329,7 @@ def preview_pdf():
         texto_extraido=texto_extraido
     )
 
+
 @app.route('/download_pdf_tarjado')
 def download_pdf_tarjado():
     path = session.get('pdf_tarjado_path', None)
@@ -393,28 +394,48 @@ def tarjar_ocr_pdf():
                             "texto": texto
                         })
 
+
         # --- BUSCA MANUAL POR TEXTO DIGITADO PELO USUÁRIO ---
-        texto_manual = request.form.get('texto_manual', '').strip()
+        texto_manual = request.form.get('tarjas_manualmente_adicionadas', '').strip()
         if texto_manual:
-            texto_manual_lower = texto_manual.lower()
+            trechos_manualmente_adicionados = [t.strip().lower() for t in texto_manual.split('|') if t.strip()]
+
             for idx, imagem in enumerate(imagens_tarjadas):
                 dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
                 draw = ImageDraw.Draw(imagem)
 
-                for i, palavra in enumerate(dados_ocr['text']):
-                    palavra_texto = (palavra or '').strip().lower()
-                    if texto_manual_lower in palavra_texto:
-                        x = int(dados_ocr['left'][i])
-                        y = int(dados_ocr['top'][i])
-                        w = int(dados_ocr['width'][i])
-                        h = int(dados_ocr['height'][i])
-                        draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+                # Agrupar palavras por linha
+                linhas = {}
+                for i in range(len(dados_ocr['text'])):
+                    linha = dados_ocr['line_num'][i]
+                    if linha not in linhas:
+                        linhas[linha] = []
+                    linhas[linha].append({
+                        'text': (dados_ocr['text'][i] or '').strip(),
+                        'left': dados_ocr['left'][i],
+                        'top': dados_ocr['top'][i],
+                        'width': dados_ocr['width'][i],
+                        'height': dados_ocr['height'][i]
+                    })
 
-                        todas_ocorrencias.append({
-                            "pagina": idx,
-                            "tipo": "manual",
-                            "texto": palavra
-                        })
+                # Verifica cada trecho manual por linha
+                for trecho in trechos_manualmente_adicionados:
+                    for palavras_linha in linhas.values():
+                        frase = ' '.join([p['text'] for p in palavras_linha]).lower()
+                        if trecho in frase:
+                            for palavra in palavras_linha:
+                                if palavra['text']:
+                                    x = int(palavra['left'])
+                                    y = int(palavra['top'])
+                                    w = int(palavra['width'])
+                                    h = int(palavra['height'])
+                                    draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+                            todas_ocorrencias.append({
+                                "pagina": idx,
+                                "tipo": "manual",
+                                "texto": trecho
+                            })
+
 
         # --- TARJAS MANUAIS (coordenadas) ---
         tarjas_manuais_str = request.form.get('tarjas_manuais', '[]')
@@ -473,6 +494,76 @@ def tarjar_ocr_pdf():
         )
 
     return render_template('tarjar_ocr_pdf.html', padroes=PADROES_SENSIVEIS.keys())
+
+@app.route('/aplicar_tarjas_ocr_pdf', methods=['POST'])
+def aplicar_tarjas_ocr_pdf():
+    caminho = session.get('ocr_pdf_path')
+    if not caminho or not os.path.exists(caminho):
+        return "Arquivo OCR não encontrado.", 400
+
+    imagens = convert_from_bytes(open(caminho, 'rb').read())
+    imagens_tarjadas = [img.copy() for img in imagens]
+
+    texto_manual = request.form.get('tarjas_manualmente_adicionadas', '').strip()
+    if not texto_manual:
+        return "Nenhum trecho manual enviado.", 400
+
+    trechos = [t.strip().lower() for t in texto_manual.split('|') if t.strip()]
+    print("🧠 Tarjas manuais recebidas:", trechos)
+
+    tarjas_aplicadas = []
+
+    for idx, imagem in enumerate(imagens_tarjadas):
+        dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
+        draw = ImageDraw.Draw(imagem)
+
+        palavras = zip(
+            dados_ocr['text'], dados_ocr['left'], dados_ocr['top'],
+            dados_ocr['width'], dados_ocr['height'], dados_ocr['line_num']
+        )
+
+        linhas = {}
+        for text, left, top, width, height, line in palavras:
+            if not text.strip():
+                continue
+            if line not in linhas:
+                linhas[line] = []
+            linhas[line].append({
+                'text': text.strip(),
+                'left': int(left),
+                'top': int(top),
+                'width': int(width),
+                'height': int(height)
+            })
+
+        for trecho in trechos:
+            for linha in linhas.values():
+                linha_texto = ' '.join(p['text'].lower() for p in linha if p['text'])
+                similaridade = fuzz.ratio(trecho, linha_texto)
+
+                if similaridade >= 92:  # mais rigoroso
+                    for palavra in linha:
+                        x, y = palavra['left'], palavra['top']
+                        w, h = palavra['width'], palavra['height']
+                        draw.rectangle([(x, y), (x + w, y + h)], fill="black")
+                        tarjas_aplicadas.append({
+                            'page': idx,
+                            'coords': (x, y, x + w, y + h),
+                            'original_text': palavra['text']
+                        })
+
+    session['tarjas_ocr'] = tarjas_aplicadas
+
+    buffer = io.BytesIO()
+    imagens_tarjadas[0].save(buffer, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name="documento_tarjado.pdf",
+        mimetype="application/pdf"
+    )
 
 @app.route('/download_pdf_ocr')
 def download_pdf_ocr():
