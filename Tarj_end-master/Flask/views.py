@@ -24,9 +24,9 @@ app.secret_key = "segredo-muito-seguro"
 
 PADROES_SENSIVEIS = {
     "CPF": r'\b\d{3}\.\d{3}\.\d{3}-\d{2}\b',
-    "RG": r'\b\d{1,2}\.?\d{3}\.?\d{3}-?\d{1}\b',
+    "RG":  r'\d{2}\.\d{3}\.\d{3}-\d{1}',
     "EMAIL": r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b',
-    "TELEFONE": r'\(?\d{2}\)?\s?\d{4,5}-\d{4}',
+    "TELEFONE": r'\(?\d{2}\)?[\s-]?\d{4,5}-\d{4}',
      "CEP": r'\b(?:\d{5}|\d{2}\.?\d{3})-\d{3}\b',
     "CNPJ": r'\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b',
     "CARTAO": r'(?:\d[ -]*?){13,16}',
@@ -129,10 +129,8 @@ def aplicar_tarjas_docx():
 
     doc = Document(caminho)
 
-    # Cria mapa de parágrafos para aplicar substituições
     paragrafo_edits = {}
 
-    # Primeiro, aplica as substituições dos checkboxes
     for item in ocorrencias:
         if item["id"] in selecionados:
             idx = item["paragrafo"]
@@ -145,7 +143,6 @@ def aplicar_tarjas_docx():
             texto_editado = paragrafo_edits[idx].replace(trecho, "█" * len(trecho), 1)
             paragrafo_edits[idx] = texto_editado
 
-    # Agora aplica os trechos manuais
     if trechos_manuais:
         for i, par in enumerate(doc.paragraphs):
             texto = paragrafo_edits.get(i, par.text)
@@ -154,18 +151,18 @@ def aplicar_tarjas_docx():
                     texto = texto.replace(trecho_manual, "█" * len(trecho_manual))
                     paragrafo_edits[i] = texto
 
-    # Atualiza os parágrafos editados
     for i, novo_texto in paragrafo_edits.items():
         par = doc.paragraphs[i]
         par.clear()
         run = par.add_run(novo_texto)
         run.font.color.rgb = RGBColor(0, 0, 0)
 
-    # Salva em memória
     mem_file = io.BytesIO()
     doc.save(mem_file)
     mem_file.seek(0)
-    os.remove(caminho)
+
+    # NÃO REMOVER o arquivo aqui! Senão o send_file não encontra.
+    # os.remove(caminho)
 
     return send_file(
         mem_file,
@@ -173,7 +170,6 @@ def aplicar_tarjas_docx():
         download_name="documento_tarjado.docx",
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
-
 
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
 def tarjar_pdf():
@@ -242,8 +238,9 @@ def tarjar_pdf():
 
 @app.route('/aplicar_tarjas_pdf', methods=['POST'])
 def aplicar_tarjas_pdf():
-
     selecionados = request.form.getlist('selecionados')
+    preservar_logo = request.form.get('preservar_logo', '0') == '1'
+
     trechos_manuais_raw = request.form.get('tarjas_manualmente_adicionadas', '')
     trechos_manuais = [t.strip() for t in trechos_manuais_raw.split('|') if t.strip()]
 
@@ -251,26 +248,23 @@ def aplicar_tarjas_pdf():
     ocorrencias = session.get('pdf_ocorrencias', [])
 
     if not caminho or not os.path.exists(caminho):
-        return "Erro: Muitos dados para processar. Tente com menos dados para tarjar", 400
+        return "Erro: arquivo temporário não encontrado.", 400
 
     doc = fitz.open(caminho)
-
     redactions_por_pagina = {}
 
-    # Redações automáticas
     for item in ocorrencias:
         if item['id'] in selecionados:
             pagina_idx = item['pagina']
             termo = item['texto']
             pagina = doc[pagina_idx]
 
-            # Busca por áreas correspondentes ao termo
             areas = pagina.search_for(termo)
             for area in areas:
-                # Verifica se essa página já tem lista de redactions
+                if preservar_logo and area.y0 < 100:
+                    continue
                 redactions_por_pagina.setdefault(pagina_idx, []).append(area)
 
-    # Redações manuais
     if trechos_manuais:
         for num_pagina in range(len(doc)):
             pagina = doc[num_pagina]
@@ -279,21 +273,23 @@ def aplicar_tarjas_pdf():
                 if trecho in texto_pagina:
                     areas = pagina.search_for(trecho)
                     for area in areas:
+                        if preservar_logo and area.y0 < 100:
+                            continue
                         redactions_por_pagina.setdefault(num_pagina, []).append(area)
 
-    # Aplicar redactions por página (depois de acumular todos)
     for pagina_idx, areas in redactions_por_pagina.items():
         pagina = doc[pagina_idx]
         for area in areas:
             pagina.add_redact_annot(area, fill=(0, 0, 0))
-        pagina.apply_redactions()  # Só uma vez por página!
+        pagina.apply_redactions()
 
-    # Salvar PDF final
     mem_file = io.BytesIO()
     doc.save(mem_file)
     mem_file.seek(0)
     doc.close()
-    os.remove(caminho)
+
+    # NÃO remover o arquivo temporário aqui para evitar erro
+    # os.remove(caminho)
 
     return send_file(
         mem_file,
@@ -339,6 +335,7 @@ def download_pdf_tarjado():
     return send_file(path, as_attachment=True, download_name="documento_tarjado.pdf", mimetype="application/pdf")
 
 
+
 @app.route('/tarjar_ocr_pdf', methods=['GET', 'POST'])
 def tarjar_ocr_pdf():
     if request.method == 'POST':
@@ -360,11 +357,9 @@ def tarjar_ocr_pdf():
         imagens_tarjadas = []
         todas_ocorrencias = []
 
-        # Primeiro cria cópia das imagens para manipular
         for imagem in imagens:
             imagens_tarjadas.append(imagem.copy())
 
-        # TARJAS AUTOMÁTICAS COM REGEX
         for idx, imagem in enumerate(imagens_tarjadas):
             dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
             draw = ImageDraw.Draw(imagem)
@@ -389,11 +384,11 @@ def tarjar_ocr_pdf():
                         draw.rectangle([(x, y), (x + w, y + h)], fill='black')
 
                         todas_ocorrencias.append({
+                            "id": str(uuid.uuid4()),
                             "pagina": idx,
                             "tipo": tipo,
                             "texto": texto
                         })
-
 
         # --- BUSCA MANUAL POR TEXTO DIGITADO PELO USUÁRIO ---
         texto_manual = request.form.get('tarjas_manualmente_adicionadas', '').strip()
@@ -418,23 +413,49 @@ def tarjar_ocr_pdf():
                         'height': dados_ocr['height'][i]
                     })
 
-                # Verifica cada trecho manual por linha
                 for trecho in trechos_manualmente_adicionados:
+                    trecho_lower = trecho.lower()
                     for palavras_linha in linhas.values():
-                        frase = ' '.join([p['text'] for p in palavras_linha]).lower()
-                        if trecho in frase:
+                        # cria o texto completo da linha com espaços, também lower
+                        linha_texto = ' '.join([p['text'] for p in palavras_linha]).lower()
+
+                        start_pos = linha_texto.find(trecho_lower)
+                        if start_pos != -1:
+                            # agora vamos mapear o trecho para as palavras que correspondem
+                            char_count = 0
+                            palavras_a_tarjar = []
+
                             for palavra in palavras_linha:
-                                if palavra['text']:
-                                    x = int(palavra['left'])
-                                    y = int(palavra['top'])
-                                    w = int(palavra['width'])
-                                    h = int(palavra['height'])
-                                    draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+                                palavra_texto = palavra['text']
+                                palavra_len = len(palavra_texto)
+                                # posição inicial e final da palavra no texto da linha
+                                palavra_start = char_count
+                                palavra_end = char_count + palavra_len
+
+                                # Verifica se a palavra está dentro do trecho a tarjar
+                                trecho_end_pos = start_pos + len(trecho_lower)
+
+                                # Condição: palavra intersecta o trecho a tarjar
+                                if (palavra_end > start_pos) and (palavra_start < trecho_end_pos):
+                                    palavras_a_tarjar.append(palavra)
+
+                                # atualiza contador (considera espaço depois da palavra)
+                                char_count += palavra_len + 1
+
+                            # pinta só as palavras dentro do trecho
+                            for palavra in palavras_a_tarjar:
+                                x = int(palavra['left'])
+                                y = int(palavra['top'])
+                                w = int(palavra['width'])
+                                h = int(palavra['height'])
+                                draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+
                             todas_ocorrencias.append({
                                 "pagina": idx,
                                 "tipo": "manual",
                                 "texto": trecho
                             })
+
 
 
         # --- TARJAS MANUAIS (coordenadas) ---
@@ -463,7 +484,7 @@ def tarjar_ocr_pdf():
             else:
                 app.logger.warning(f"Tarja manual inválida ignorada: {tarja}")
 
-        # --- FINALIZA PDF TARJADO ---
+        # Salvar PDF temporário
         pdf_tarjado = io.BytesIO()
         try:
             imagens_tarjadas[0].save(pdf_tarjado, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
@@ -495,21 +516,25 @@ def tarjar_ocr_pdf():
 
     return render_template('tarjar_ocr_pdf.html', padroes=PADROES_SENSIVEIS.keys())
 
+    
 @app.route('/aplicar_tarjas_ocr_pdf', methods=['POST'])
 def aplicar_tarjas_ocr_pdf():
     caminho = session.get('ocr_pdf_path')
+    ocorrencias_automaticas = session.get('ocr_ocorrencias', [])
+
     if not caminho or not os.path.exists(caminho):
         return "Arquivo OCR não encontrado.", 400
 
     imagens = convert_from_bytes(open(caminho, 'rb').read())
     imagens_tarjadas = [img.copy() for img in imagens]
 
-    texto_manual = request.form.get('tarjas_manualmente_adicionadas', '').strip()
-    if not texto_manual:
-        return "Nenhum trecho manual enviado.", 400
+    # IDs selecionados via checkbox
+    selecionados = request.form.getlist('selecionados')
+    selecionados_set = set(selecionados)
 
-    trechos = [t.strip().lower() for t in texto_manual.split('|') if t.strip()]
-    print("🧠 Tarjas manuais recebidas:", trechos)
+    # Trechos manuais recebidos do formulário
+    texto_manual = request.form.get('tarjas_manualmente_adicionadas', '').strip()
+    trechos_manuais = [t.strip().lower() for t in texto_manual.split('|') if t.strip()]
 
     tarjas_aplicadas = []
 
@@ -517,40 +542,44 @@ def aplicar_tarjas_ocr_pdf():
         dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
         draw = ImageDraw.Draw(imagem)
 
-        palavras = zip(
-            dados_ocr['text'], dados_ocr['left'], dados_ocr['top'],
-            dados_ocr['width'], dados_ocr['height'], dados_ocr['line_num']
-        )
-
-        linhas = {}
-        for text, left, top, width, height, line in palavras:
-            if not text.strip():
+        blocos = {}
+        for i in range(len(dados_ocr['text'])):
+            palavra = (dados_ocr['text'][i] or '').strip()
+            if not palavra:
                 continue
-            if line not in linhas:
-                linhas[line] = []
-            linhas[line].append({
-                'text': text.strip(),
-                'left': int(left),
-                'top': int(top),
-                'width': int(width),
-                'height': int(height)
+            bloco_id = (dados_ocr['block_num'][i], dados_ocr['line_num'][i])
+            if bloco_id not in blocos:
+                blocos[bloco_id] = []
+            blocos[bloco_id].append({
+                'text': palavra,
+                'left': int(dados_ocr['left'][i]),
+                'top': int(dados_ocr['top'][i]),
+                'width': int(dados_ocr['width'][i]),
+                'height': int(dados_ocr['height'][i])
             })
 
-        for trecho in trechos:
-            for linha in linhas.values():
-                linha_texto = ' '.join(p['text'].lower() for p in linha if p['text'])
-                similaridade = fuzz.ratio(trecho, linha_texto)
+        # Aplica tarjas só nas ocorrências selecionadas
+        for ocorrencia in [o for o in ocorrencias_automaticas if o.get('pagina') == idx]:
+            if str(ocorrencia.get('id')) not in selecionados_set:
+                continue
+            for palavras_linha in blocos.values():
+                frase = ' '.join([p['text'] for p in palavras_linha]).lower()
+                if ocorrencia['texto'].lower() in frase:
+                    for palavra in palavras_linha:
+                        x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
+                        draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+                        tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
 
-                if similaridade >= 92:  # mais rigoroso
-                    for palavra in linha:
-                        x, y = palavra['left'], palavra['top']
-                        w, h = palavra['width'], palavra['height']
-                        draw.rectangle([(x, y), (x + w, y + h)], fill="black")
-                        tarjas_aplicadas.append({
-                            'page': idx,
-                            'coords': (x, y, x + w, y + h),
-                            'original_text': palavra['text']
-                        })
+        # Aplica tarjas manuais (igual seu código)
+        for trecho in trechos_manuais:
+            for palavras_linha in blocos.values():
+                frase = ' '.join([p['text'] for p in palavras_linha]).lower()
+                similaridade = fuzz.partial_ratio(trecho, frase)
+                if similaridade >= 85:
+                    for palavra in palavras_linha:
+                        x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
+                        draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+                        tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
 
     session['tarjas_ocr'] = tarjas_aplicadas
 
