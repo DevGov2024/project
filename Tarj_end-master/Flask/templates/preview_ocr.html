@@ -18,7 +18,7 @@
         <!-- Início do formulário -->
         <form method="post" action="{{ url_for('aplicar_tarjas_ocr_pdf') }}">
           <!-- Campo oculto para trechos manuais -->
-        <input type="hidden" name="tarjas_manualmente_adicionadas" id="manualTarjasHidden">
+        <input type="hidden" name="tarjas_manuais_json" id="manualTarjasHidden">
 
           <!-- Campo para adicionar tarjas manuais -->
           <div class="mb-3">
@@ -70,44 +70,87 @@
     </div>
 
     <!-- Script para adicionar e visualizar tarjas manuais -->
-    <script>
-      let tarjasManuais = [];
+   <script>
+    let tarjasManuais = [];
+    let idCounter = 10000;
 
-      function adicionarTarjaManual() {
-        const input = document.getElementById("trechoManual");
-        const valor = input.value.trim();
-        if (valor.length === 0) {
-          alert("Insira um trecho antes de adicionar.");
+    function adicionarTarjaManual() {
+      const input = document.getElementById("trechoManual");
+      const valor = input.value.trim();
+      if (valor.length === 0) {
+        alert("Insira um trecho antes de adicionar.");
+        return;
+      }
+
+      const novaTarja = { id: idCounter++, pagina: 0, trecho: valor };
+      tarjasManuais.push(novaTarja);
+
+      document.getElementById("manualTarjasHidden").value = JSON.stringify(tarjasManuais);
+
+      const li = document.createElement("li");
+      li.className = "list-group-item d-flex justify-content-between align-items-center";
+      li.textContent = valor;
+
+      const btnRemover = document.createElement("button");
+      btnRemover.textContent = "Remover";
+      btnRemover.className = "btn btn-sm btn-outline-danger ms-2";
+      btnRemover.onclick = function () {
+        tarjasManuais = tarjasManuais.filter(t => t.id !== novaTarja.id);
+        document.getElementById("manualTarjasHidden").value = JSON.stringify(tarjasManuais);
+        li.remove();
+        atualizarPreviewOCR();
+      };
+
+      li.appendChild(btnRemover);
+      document.getElementById("listaTarjas").appendChild(li);
+
+      input.value = "";
+      atualizarPreviewOCR();
+    }
+
+    document.getElementById("checkAll").addEventListener("change", function () {
+      const checkboxes = document.querySelectorAll(".item-checkbox");
+      checkboxes.forEach(cb => cb.checked = this.checked);
+      atualizarPreviewOCR();
+    });
+
+    document.querySelectorAll(".item-checkbox").forEach(cb => {
+      cb.addEventListener("change", atualizarPreviewOCR);
+    });
+
+    async function atualizarPreviewOCR() {
+      const selecionados = Array.from(document.querySelectorAll('input[name="selecionados"]:checked')).map(i => i.value);
+      const manuais = tarjasManuais;
+
+      try {
+        const resp = await fetch('/atualizar_preview_ocr_pdf', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({selecionados, manuais})
+        });
+
+        if (!resp.ok) {
+          alert('Erro ao atualizar preview OCR');
           return;
         }
 
-        tarjasManuais.push(valor);
-        document.getElementById("manualTarjasHidden").value = tarjasManuais.join("|");
+        const data = await resp.json();
+        if (data.erro) {
+          alert('Erro: ' + data.erro);
+          return;
+        }
 
-        // Atualiza lista visual
-        const li = document.createElement("li");
-        li.className = "list-group-item d-flex justify-content-between align-items-center";
-        li.textContent = valor;
+        // Atualiza embed do PDF OCR com base64 retornado
+        const embed = document.querySelector('embed[type="application/pdf"]');
+        embed.src = 'data:application/pdf;base64,' + data.pdf_data;
 
-        const btnRemover = document.createElement("button");
-        btnRemover.textContent = "Remover";
-        btnRemover.className = "btn btn-sm btn-outline-danger ms-2";
-        btnRemover.onclick = function () {
-          tarjasManuais = tarjasManuais.filter(t => t !== valor);
-          document.getElementById("manualTarjasHidden").value = tarjasManuais.join("|");
-          li.remove();
-        };
-
-        li.appendChild(btnRemover);
-        document.getElementById("listaTarjas").appendChild(li);
-
-        input.value = ""; // limpa o campo
+      } catch (e) {
+        alert('Erro inesperado ao atualizar preview OCR');
+        console.error(e);
       }
+    }
 
-      // Checkbox mestre
-      document.getElementById("checkAll").addEventListener("change", function () {
-        const checkboxes = document.querySelectorAll(".item-checkbox");
-        checkboxes.forEach(cb => cb.checked = this.checked);
-      });
-    </script>
+    window.addEventListener('load', atualizarPreviewOCR);
+</script>
+
 {% endblock %}

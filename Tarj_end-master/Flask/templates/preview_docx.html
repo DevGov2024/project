@@ -36,15 +36,19 @@
 
                         <h4 class="mb-2">Texto Original:</h4>
                         <div class="border p-3 rounded bg-light" style="max-height: 400px; overflow-y: auto;">
-                        <!-- Campo oculto para trechos manuais -->
+
+                       <!-- Campo oculto para trechos manuais -->
                         <input type="hidden" name="tarjas_manualmente_adicionadas" id="manualTarjasHidden">
+
+                        <!-- Container para preview dinâmico -->
+                        <div id="previewConteudo" class="border p-3 rounded bg-light" style="max-height: 400px; overflow-y: auto;">
+                            {% for p in paragrafos %}
+                                <p>{{ p }}</p>
+                            {% endfor %}
+                        </div>
 
                         <!-- Botão que adiciona o texto selecionado -->
                         <button type="button" class="btn btn-outline-secondary my-2" onclick="adicionarSelecaoComoTarja()">➕ Adicionar Seleção como Tarja</button>
-                            {% for p in paragrafos %}
-                            <p>{{ p }}</p>
-                            {% endfor %}
-                        </div>
 
                      <div class="d-flex justify-content-center align-items-center mt-4">
                         <button type="submit" class="btn btn-primary">
@@ -55,7 +59,6 @@
                                <i class="bi bi-house-door-fill me-2"></i> Cancelar Solicitação
                             </a>
                         </div>
-
                         <script>
                         let tarjasManuais = [];
 
@@ -65,15 +68,55 @@
                                 alert("Selecione um trecho de texto com o mouse para adicionar como tarja.");
                                 return;
                             }
-
                             tarjasManuais.push(selecionado);
                             document.getElementById("manualTarjasHidden").value = tarjasManuais.join("|");
                             alert(`Trecho selecionado "${selecionado}" adicionado para tarjamento.`);
+                            atualizarPreview();
                         }
+
+                        async function atualizarPreview() {
+                            const selecionados = Array.from(document.querySelectorAll('input[name="selecionados"]:checked')).map(i => i.value);
+                            const manuaisRaw = document.getElementById('manualTarjasHidden').value;
+                            const manuais = manuaisRaw.split('|').map(t => t.trim()).filter(t => t.length > 0);
+
+                            try {
+                                const resp = await fetch('/atualizar_preview_docx', {
+                                    method: 'POST',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({selecionados, manuais})
+                                });
+
+                                if (!resp.ok) {
+                                    const text = await resp.text();
+                                    console.error('Erro na resposta:', text);
+                                    alert('Erro ao atualizar preview');
+                                    return;
+                                }
+
+                                const data = await resp.json();
+
+                                if (data.erro) {
+                                    console.error('Erro do servidor:', data.erro);
+                                    alert('Erro ao atualizar preview: ' + data.erro);
+                                    return;
+                                }
+
+                                const container = document.getElementById('previewConteudo');
+                                container.innerHTML = '';
+                                data.paragrafos.forEach(texto => {
+                                    const p = document.createElement('p');
+                                    p.textContent = texto;
+                                    container.appendChild(p);
+                                });
+                            } catch (e) {
+                                console.error('Erro na requisição:', e);
+                                alert('Erro inesperado ao atualizar preview');
+                            }
+                        }
+
                     </script>
-                    
+
                     </form>
-                    <!-- Fim do formulário -->
                 </div>
             </section>
         </div>

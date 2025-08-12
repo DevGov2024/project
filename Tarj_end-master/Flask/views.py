@@ -1,5 +1,5 @@
 from main import app
-from flask import render_template, request, send_file, redirect, url_for, session
+from flask import Flask, render_template, request, send_file, redirect, url_for, session, jsonify
 import re
 import tempfile
 import os
@@ -27,7 +27,7 @@ PADROES_SENSIVEIS = {
     "RG":  r'\d{2}\.\d{3}\.\d{3}-\d{1}',
     "EMAIL": r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b',
     "TELEFONE": r'\(?\d{2}\)?[\s-]?\d{4,5}-\d{4}',
-     "CEP": r'\b(?:\d{5}|\d{2}\.?\d{3})-\d{3}\b',
+    "CEP": r'\b(?:\d{5}|\d{2}\.?\d{3})-\d{3}\b',
     "CNPJ": r'\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b',
     "CARTAO": r'(?:\d[ -]*?){13,16}',
     "PLACA": r'\b[A-Z]{3}-?\d{1}[A-Z0-9]{1}\d{2}\b',
@@ -170,6 +170,50 @@ def aplicar_tarjas_docx():
         download_name="documento_tarjado.docx",
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
+
+@app.route("/atualizar_preview_docx", methods=["POST"])
+def atualizar_preview_docx():
+    try:
+        data = request.get_json(force=True)
+        selecionados = data.get("selecionados", [])
+        trechos_manuais = data.get("manuais", [])
+
+        ocorrencias = session.get("doc_ocorrencias", [])
+        caminho = session.get("doc_path", None)
+
+        if not caminho or not os.path.exists(caminho):
+            return jsonify({"erro": "Arquivo temporário não encontrado."}), 400
+
+        doc = Document(caminho)
+        paragrafo_edits = {}
+
+        # Tarjas automáticas selecionadas
+        for item in ocorrencias:
+            if item["id"] in selecionados:
+                idx = item["paragrafo"]
+                texto_original = doc.paragraphs[idx].text
+                if idx not in paragrafo_edits:
+                    paragrafo_edits[idx] = texto_original
+                start, end = item["start"], item["end"]
+                trecho = texto_original[start:end]
+                texto_editado = paragrafo_edits[idx].replace(trecho, "█" * len(trecho), 1)
+                paragrafo_edits[idx] = texto_editado
+
+        # Tarjas manuais
+        for i, par in enumerate(doc.paragraphs):
+            texto = paragrafo_edits.get(i, par.text)
+            for trecho_manual in trechos_manuais:
+                if trecho_manual in texto:
+                    texto = texto.replace(trecho_manual, "█" * len(trecho_manual))
+                    paragrafo_edits[i] = texto
+
+        paragrafos_atualizados = [paragrafo_edits.get(i, doc.paragraphs[i].text) for i in range(len(doc.paragraphs))]
+
+        return jsonify({"paragrafos": paragrafos_atualizados})
+
+    except Exception as e:
+        # Aqui ajuda a diagnosticar o erro, retorna mensagem no JSON para o frontend
+        return jsonify({"erro": f"Erro no servidor: {str(e)}"}), 500
 
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
 def tarjar_pdf():
@@ -325,6 +369,60 @@ def preview_pdf():
         texto_extraido=texto_extraido
     )
 
+@app.route('/atualizar_preview_pdf', methods=['POST'])
+def atualizar_preview_pdf():
+    try:
+        data = request.get_json(force=True)
+        selecionados = data.get("selecionados", [])
+        trechos_manuais = data.get("manuais", [])
+
+        caminho = session.get('pdf_path')
+        ocorrencias = session.get('pdf_ocorrencias', [])
+
+        if not caminho or not os.path.exists(caminho):
+            return jsonify({"erro": "Arquivo temporário não encontrado."}), 400
+
+        doc = fitz.open(caminho)
+        redactions_por_pagina = {}
+
+        # Aplica tarjas automáticas selecionadas
+        for item in ocorrencias:
+            if item['id'] in selecionados:
+                pagina_idx = item['pagina']
+                termo = item['texto']
+                pagina = doc[pagina_idx]
+                areas = pagina.search_for(termo)
+                for area in areas:
+                    redactions_por_pagina.setdefault(pagina_idx, []).append(area)
+
+        # Aplica tarjas manuais
+        for num_pagina in range(len(doc)):
+            pagina = doc[num_pagina]
+            texto_pagina = pagina.get_text()
+            for trecho in trechos_manuais:
+                if trecho in texto_pagina:
+                    areas = pagina.search_for(trecho)
+                    for area in areas:
+                        redactions_por_pagina.setdefault(num_pagina, []).append(area)
+
+        # Aplica as redactions para visualização
+        for pagina_idx, areas in redactions_por_pagina.items():
+            pagina = doc[pagina_idx]
+            for area in areas:
+                pagina.add_redact_annot(area, fill=(0, 0, 0))
+            pagina.apply_redactions()
+
+        mem_file = io.BytesIO()
+        doc.save(mem_file)
+        mem_file.seek(0)
+        doc.close()
+
+        pdf_b64 = base64.b64encode(mem_file.read()).decode('utf-8')
+
+        return jsonify({"pdf_data": pdf_b64})
+
+    except Exception as e:
+        return jsonify({"erro": f"Erro no servidor: {str(e)}"}), 500
 
 @app.route('/download_pdf_tarjado')
 def download_pdf_tarjado():
@@ -384,7 +482,7 @@ def tarjar_ocr_pdf():
                         draw.rectangle([(x, y), (x + w, y + h)], fill='black')
 
                         todas_ocorrencias.append({
-                            "id": str(uuid.uuid4()),
+                            "id": str(uuid.uuid4()),  # <<< Garantir ID único para seleção posterior
                             "pagina": idx,
                             "tipo": tipo,
                             "texto": texto
@@ -451,12 +549,11 @@ def tarjar_ocr_pdf():
                                 draw.rectangle([(x, y), (x + w, y + h)], fill='black')
 
                             todas_ocorrencias.append({
+                                "id": str(uuid.uuid4()),  # <<< Garantir ID único
                                 "pagina": idx,
                                 "tipo": "manual",
                                 "texto": trecho
                             })
-
-
 
         # --- TARJAS MANUAIS (coordenadas) ---
         tarjas_manuais_str = request.form.get('tarjas_manuais', '[]')
@@ -570,7 +667,7 @@ def aplicar_tarjas_ocr_pdf():
                         draw.rectangle([(x, y), (x + w, y + h)], fill='black')
                         tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
 
-        # Aplica tarjas manuais (igual seu código)
+        # Aplica tarjas manuais 
         for trecho in trechos_manuais:
             for palavras_linha in blocos.values():
                 frase = ' '.join([p['text'] for p in palavras_linha]).lower()
@@ -593,6 +690,8 @@ def aplicar_tarjas_ocr_pdf():
         download_name="documento_tarjado.pdf",
         mimetype="application/pdf"
     )
+
+
 
 @app.route('/download_pdf_ocr')
 def download_pdf_ocr():

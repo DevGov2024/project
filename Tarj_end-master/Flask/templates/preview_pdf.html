@@ -10,17 +10,14 @@
             <p class="text-muted">Abaixo está a pré-visualização do seu documento com as tarjas aplicadas. Você pode ajustar as tarjas antes de baixar.</p>
             <hr>
 
-            <!-- PDF embutido -->
+            <!-- PDF embutido com id para atualizar -->
             <div class="border rounded-3 mb-4" style="height: 700px;">
-               <iframe src="data:application/pdf;base64,{{ pdf_data }}" width="100%" height="100%" style="border: none;"></iframe>
+               <iframe id="pdfIframe" src="data:application/pdf;base64,{{ pdf_data }}" width="100%" height="100%" style="border: none;"></iframe>
             </div>
 
-            <!-- Início do formulário -->
             <form method="post" action="{{ url_for('aplicar_tarjas_pdf') }}">
-                <!-- Campo oculto para trechos manuais -->
                 <input type="hidden" name="tarjas_manualmente_adicionadas" id="manualTarjasHidden">
 
-                <!-- Campo para adicionar tarjas manuais -->
                 <div class="mb-3">
                     <label for="trechoManual" class="form-label">Inserir trecho manual:</label>
                     <div class="input-group">
@@ -30,14 +27,11 @@
                     <small class="form-text text-muted">Você pode adicionar vários trechos, um de cada vez.</small>
                 </div>
 
-                <!-- Lista visual dos trechos manuais -->
                 <ul id="listaTarjas" class="list-group mb-4"></ul>
 
                 <h4 class="mb-3">Dados encontrados:</h4>
                 <div class="mb-4">
-
                     <p><strong>{{ ocorrencias|length }}</strong> ocorrência(s) sensível(is) detectada(s).</p>
-                    <!-- Checkbox Mestre -->
                     <div class="form-check mb-2">
                         <input class="form-check-input" type="checkbox" id="checkAll" checked>
                         <label class="form-check-label fw-bold" for="checkAll">Selecionar/Desmarcar todos</label>
@@ -52,7 +46,7 @@
                     {% endfor %}
                 </div>
                 <hr>
-                
+
                 <div class="d-flex justify-content-center align-items-center mt-4">
                     <button type="submit" class="btn btn-primary">
                         <i class="bi bi-shield-fill-x me-2"></i>Aplicar Tarjas e Fazer Download
@@ -66,7 +60,6 @@
     </section>
 </div>
 
-<!-- Script para adicionar e visualizar tarjas manuais -->
 <script>
     let tarjasManuais = [];
 
@@ -77,7 +70,6 @@
             alert("Insira um trecho antes de adicionar.");
             return;
         }
-
         tarjasManuais.push(valor);
         document.getElementById("manualTarjasHidden").value = tarjasManuais.join("|");
 
@@ -93,17 +85,62 @@
             tarjasManuais = tarjasManuais.filter(t => t !== valor);
             document.getElementById("manualTarjasHidden").value = tarjasManuais.join("|");
             li.remove();
+            atualizarPreviewPDF();
         };
 
         li.appendChild(btnRemover);
         document.getElementById("listaTarjas").appendChild(li);
 
-        input.value = ""; // limpa o campo
+        input.value = "";
+
+        atualizarPreviewPDF();
     }
 
     document.getElementById("checkAll").addEventListener("change", function () {
         const checkboxes = document.querySelectorAll(".item-checkbox");
         checkboxes.forEach(cb => cb.checked = this.checked);
+        atualizarPreviewPDF();
     });
+
+    document.querySelectorAll(".item-checkbox").forEach(cb => {
+        cb.addEventListener("change", atualizarPreviewPDF);
+    });
+
+    async function atualizarPreviewPDF() {
+        const selecionados = Array.from(document.querySelectorAll('input[name="selecionados"]:checked')).map(i => i.value);
+        const manuaisRaw = document.getElementById('manualTarjasHidden').value;
+        const manuais = manuaisRaw.split('|').map(t => t.trim()).filter(t => t.length > 0);
+
+        try {
+            const resp = await fetch('/atualizar_preview_pdf', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({selecionados, manuais})
+            });
+
+            if (!resp.ok) {
+                alert('Erro ao atualizar preview');
+                return;
+            }
+
+            const data = await resp.json();
+
+            if (data.erro) {
+                alert('Erro ao atualizar preview: ' + data.erro);
+                return;
+            }
+
+            // Atualiza o iframe com o PDF base64 retornado
+            document.getElementById('pdfIframe').src = 'data:application/pdf;base64,' + data.pdf_data;
+
+        } catch (e) {
+            alert('Erro inesperado ao atualizar preview');
+            console.error(e);
+        }
+    }
+
+    // Atualiza preview ao carregar a página
+    window.addEventListener('load', atualizarPreviewPDF);
+
 </script>
 {% endblock %}
