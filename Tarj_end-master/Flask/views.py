@@ -13,7 +13,8 @@ from docx.shared import RGBColor
 import json
 from fuzzywuzzy import fuzz
 from pdf2image import convert_from_bytes
-import pytesseract
+import pytesseract 
+import spacy
 
 from PIL import Image, ImageDraw
 
@@ -76,20 +77,17 @@ def tarjar_docx_preview():
 
         for i, par in enumerate(doc.paragraphs):
             texto = par.text
-            texto_tarjado = texto  # manter original para sobrescrever com tarjas
-            offset = 0  # controle de deslocamento conforme o texto é alterado
+            texto_tarjado = texto  # para substituir o texto
+            offset = 0
 
+            # 1️⃣ Regex (como você já faz)
             for tipo, regex in padroes_ativos.items():
                 for m in re.finditer(regex, texto):
                     encontrado = m.group()
                     inicio = m.start() + offset
                     fim = m.end() + offset
                     tarja = '█' * len(encontrado)
-                    texto_tarjado = (
-                        texto_tarjado[:inicio] + tarja + texto_tarjado[fim:]
-                    )
-
-                    # Atualiza o offset após substituir
+                    texto_tarjado = texto_tarjado[:inicio] + tarja + texto_tarjado[fim:]
                     offset += len(tarja) - len(encontrado)
 
                     ocorrencias.append({
@@ -101,9 +99,31 @@ def tarjar_docx_preview():
                         "id": f"{i}_{m.start()}_{m.end()}"
                     })
 
+            # 2️⃣ spaCy para detectar entidades (nomes, org, loc)
+            doc_spacy = nlp(texto)
+            for ent in doc_spacy.ents:
+                if ent.label_ in ["PER", "ORG", "LOC"]:
+                    termo = ent.text.strip()
+                    # Evitar duplicatas:
+                    if not any(o["texto"] == termo and o["paragrafo"] == i for o in ocorrencias):
+                        inicio = texto_tarjado.find(termo)
+                        if inicio != -1:
+                            fim = inicio + len(termo)
+                            tarja = '█' * len(termo)
+                            texto_tarjado = texto_tarjado[:inicio] + tarja + texto_tarjado[fim:]
+
+                            ocorrencias.append({
+                                "tipo": f"spaCy_{ent.label_}",
+                                "texto": termo,
+                                "paragrafo": i,
+                                "start": inicio,
+                                "end": fim,
+                                "id": f"spacy_{i}_{inicio}_{fim}"
+                            })
+
             paragrafos_com_tarja.append(texto_tarjado)
 
-        # Salva cópia temporária do original para edição posterior
+        # Salvar original temporário
         temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".docx").name
         with open(temp_path, "wb") as f:
             f.write(conteudo_bytes)
@@ -215,7 +235,9 @@ def atualizar_preview_docx():
         # Aqui ajuda a diagnosticar o erro, retorna mensagem no JSON para o frontend
         return jsonify({"erro": f"Erro no servidor: {str(e)}"}), 500
 
-@app.route('/tarjar_pdf', methods=['GET', 'POST'])
+nlp = spacy.load("pt_core_news_md")  # pode trocar por "pt_core_news_lg" para mais precisão
+
+@app.route('/tarjar_pdf', methods=['GET', 'POST']) 
 def tarjar_pdf():
     if request.method == 'POST':
         arquivo = request.files.get('pdffile')
@@ -236,6 +258,7 @@ def tarjar_pdf():
             pagina = doc[pagina_num]
             texto = pagina.get_text("text")
 
+            # 1️⃣ Primeiro: Regex (o que você já tem)
             for tipo, regex in padroes_filtrados.items():
                 for m in re.finditer(regex, texto):
                     termo = m.group()
@@ -252,14 +275,35 @@ def tarjar_pdf():
                     for area in areas:
                         redactions_por_pagina.setdefault(pagina_num, []).append(area)
 
-        # Aplicar redactions (apenas para visualização)
+            # 2️⃣ Agora: spaCy para complementar
+            doc_spacy = nlp(texto)
+            for ent in doc_spacy.ents:
+                if ent.label_ in ["PER", "ORG", "LOC"]:  # Pessoa, organização, local
+                    termo = ent.text.strip()
+
+                    # Evitar duplicar algo já capturado pelo regex
+                    if not any(o["texto"] == termo and o["pagina"] == pagina_num for o in ocorrencias):
+                        ocorrencias.append({
+                            "id": f"{pagina_num}_spacy_{hash(termo)}",
+                            "tipo": f"spaCy_{ent.label_}",
+                            "texto": termo,
+                            "pagina": pagina_num,
+                            "start": ent.start_char,
+                            "end": ent.end_char
+                        })
+
+                        areas = pagina.search_for(termo)
+                        for area in areas:
+                            redactions_por_pagina.setdefault(pagina_num, []).append(area)
+
+        # Aplicar redactions para visualização
         for pagina_idx, areas in redactions_por_pagina.items():
             pagina = doc[pagina_idx]
             for area in areas:
                 pagina.add_redact_annot(area, fill=(0, 0, 0))
             pagina.apply_redactions()
 
-        # Salvar o PDF modificado em memória
+        # Salvar em memória
         mem_file = io.BytesIO()
         doc.save(mem_file)
         mem_file.seek(0)
@@ -267,7 +311,7 @@ def tarjar_pdf():
 
         pdf_b64 = base64.b64encode(mem_file.read()).decode('utf-8')
 
-        # Ainda salvamos o original temporariamente, caso o usuário queira aplicar tarjas reais depois
+        # Salvar original temporário para aplicar tarjas definitivas depois
         temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
         with open(temp_path, 'wb') as f:
             f.write(pdf_bytes)
@@ -710,3 +754,7 @@ def ver_pdf_ocr():
         return "Arquivo não encontrado.", 404
 
     return send_file(caminho, mimetype='application/pdf')
+
+
+
+
