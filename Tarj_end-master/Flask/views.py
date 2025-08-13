@@ -74,44 +74,24 @@ def tarjar_docx_preview():
 
         ocorrencias = []
         paragrafos_com_tarja = []
+        ocorrencias_set = set()  # evita duplicatas (parágrafo, texto)
 
         for i, par in enumerate(doc.paragraphs):
-            texto = par.text
-            texto_tarjado = texto  # para substituir o texto
-            offset = 0
+            texto_original = par.text
+            texto_tarjado = texto_original
 
-            # 1️⃣ Regex (como você já faz)
-            for tipo, regex in padroes_ativos.items():
-                for m in re.finditer(regex, texto):
-                    encontrado = m.group()
-                    inicio = m.start() + offset
-                    fim = m.end() + offset
-                    tarja = '█' * len(encontrado)
-                    texto_tarjado = texto_tarjado[:inicio] + tarja + texto_tarjado[fim:]
-                    offset += len(tarja) - len(encontrado)
-
-                    ocorrencias.append({
-                        "tipo": tipo,
-                        "texto": encontrado,
-                        "paragrafo": i,
-                        "start": m.start(),
-                        "end": m.end(),
-                        "id": f"{i}_{m.start()}_{m.end()}"
-                    })
-
-            # 2️⃣ spaCy para detectar entidades (nomes, org, loc)
-            doc_spacy = nlp(texto)
+            # 1️⃣ Detectar entidades com spaCy primeiro
+            doc_spacy = nlp(texto_original)
             for ent in doc_spacy.ents:
-                if ent.label_ in ["PER", "ORG", "LOC"]:
+                if ent.label_ in ["PER", "ORG", "LOC"] and len(ent.text.strip()) > 2:
                     termo = ent.text.strip()
-                    # Evitar duplicatas:
-                    if not any(o["texto"] == termo and o["paragrafo"] == i for o in ocorrencias):
+                    chave = (i, termo)
+                    if chave not in ocorrencias_set:
                         inicio = texto_tarjado.find(termo)
                         if inicio != -1:
                             fim = inicio + len(termo)
                             tarja = '█' * len(termo)
                             texto_tarjado = texto_tarjado[:inicio] + tarja + texto_tarjado[fim:]
-
                             ocorrencias.append({
                                 "tipo": f"spaCy_{ent.label_}",
                                 "texto": termo,
@@ -120,6 +100,29 @@ def tarjar_docx_preview():
                                 "end": fim,
                                 "id": f"spacy_{i}_{inicio}_{fim}"
                             })
+                            ocorrencias_set.add(chave)
+
+            # 2️⃣ Aplicar regex depois
+            offset = 0
+            for tipo, regex in padroes_ativos.items():
+                for m in re.finditer(regex, texto_tarjado):
+                    encontrado = m.group()
+                    chave = (i, encontrado)
+                    if chave not in ocorrencias_set:
+                        inicio = m.start() + offset
+                        fim = m.end() + offset
+                        tarja = '█' * len(encontrado)
+                        texto_tarjado = texto_tarjado[:inicio] + tarja + texto_tarjado[fim:]
+                        offset += len(tarja) - len(encontrado)
+                        ocorrencias.append({
+                            "tipo": tipo,
+                            "texto": encontrado,
+                            "paragrafo": i,
+                            "start": m.start(),
+                            "end": m.end(),
+                            "id": f"{i}_{m.start()}_{m.end()}"
+                        })
+                        ocorrencias_set.add(chave)
 
             paragrafos_com_tarja.append(texto_tarjado)
 
