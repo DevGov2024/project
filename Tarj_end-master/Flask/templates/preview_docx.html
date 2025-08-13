@@ -59,9 +59,10 @@
                                <i class="bi bi-house-door-fill me-2"></i> Cancelar Solicitação
                             </a>
                         </div>
-                        <script>
+                       <script>
                         let tarjasManuais = [];
 
+                        // Função que adiciona o texto selecionado como tarja manual
                         function adicionarSelecaoComoTarja() {
                             const selecionado = window.getSelection().toString().trim();
                             if (selecionado.length === 0) {
@@ -74,6 +75,7 @@
                             atualizarPreview();
                         }
 
+                        // Atualiza preview do DOCX com base nas tarjas manuais e automáticas
                         async function atualizarPreview() {
                             const selecionados = Array.from(document.querySelectorAll('input[name="selecionados"]:checked')).map(i => i.value);
                             const manuaisRaw = document.getElementById('manualTarjasHidden').value;
@@ -108,13 +110,29 @@
                                     p.textContent = texto;
                                     container.appendChild(p);
                                 });
+
                             } catch (e) {
                                 console.error('Erro na requisição:', e);
                                 alert('Erro inesperado ao atualizar preview');
                             }
                         }
 
-                    </script>
+                        // Checkbox mestre para selecionar/desmarcar todos
+                        document.getElementById("checkAll").addEventListener("change", function () {
+                            const checkboxes = document.querySelectorAll(".item-checkbox");
+                            checkboxes.forEach(cb => cb.checked = this.checked);
+                            atualizarPreview();
+                        });
+
+                        // Atualiza preview ao alterar qualquer checkbox individual
+                        document.querySelectorAll(".item-checkbox").forEach(cb => {
+                            cb.addEventListener("change", atualizarPreview);
+                        });
+
+                        // Atualiza preview assim que a página carrega
+                        window.addEventListener('load', atualizarPreview);
+                        </script>
+
 
                     </form>
                 </div>

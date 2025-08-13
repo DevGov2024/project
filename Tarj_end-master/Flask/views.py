@@ -17,24 +17,11 @@ import pytesseract
 
 from PIL import Image, ImageDraw
 
+from regex_patterns import PADROES_SENSIVEIS
 
 # Habilita sessão para guardar dados temporários
 app.secret_key = "segredo-muito-seguro"
 
-
-PADROES_SENSIVEIS = {
-    "CPF": r'\b\d{3}\.\d{3}\.\d{3}-\d{2}\b',
-    "RG":  r'\d{2}\.\d{3}\.\d{3}-\d{1}',
-    "EMAIL": r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b',
-    "TELEFONE": r'\(?\d{2}\)?[\s-]?\d{4,5}-\d{4}',
-    "CEP": r'\b(?:\d{5}|\d{2}\.?\d{3})-\d{3}\b',
-    "CNPJ": r'\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b',
-    "CARTAO": r'(?:\d[ -]*?){13,16}',
-    "PLACA": r'\b[A-Z]{3}-?\d{1}[A-Z0-9]{1}\d{2}\b',
-    "DATA": r'\b\d{2}/\d{2}/\d{4}\b',
-    "ENDERECO": r"\b(?:Rua|Av|Avenida|Travessa|Estrada|Rodovia|R\.|Av\.?)\.?\s+[A-Za-zÀ-ÖØ-öø-ÿ0-9\s]+,\s*\d+",
-    "NOME": r'\b([A-ZÁÉÍÓÚÂÊÎÔÛÃÕÇ][a-záéíóúâêîôûãõç]+(?:\s+(?:da|de|do|dos|das|e)?\s*[A-Z][a-z]+)+)\b',
-}
 
 @app.route("/",  methods=["GET", "POST"])
 def homepage():
@@ -171,13 +158,19 @@ def aplicar_tarjas_docx():
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
+import re
+from flask import jsonify, session
+from docx import Document
+
 @app.route("/atualizar_preview_docx", methods=["POST"])
 def atualizar_preview_docx():
     try:
+        # Recebe JSON do frontend
         data = request.get_json(force=True)
-        selecionados = data.get("selecionados", [])
+        selecionados = set(data.get("selecionados", []))
         trechos_manuais = data.get("manuais", [])
 
+        # Obtém ocorrências automáticas e caminho do DOCX da sessão
         ocorrencias = session.get("doc_ocorrencias", [])
         caminho = session.get("doc_path", None)
 
@@ -187,7 +180,7 @@ def atualizar_preview_docx():
         doc = Document(caminho)
         paragrafo_edits = {}
 
-        # Tarjas automáticas selecionadas
+        # --- Tarjas automáticas selecionadas ---
         for item in ocorrencias:
             if item["id"] in selecionados:
                 idx = item["paragrafo"]
@@ -196,23 +189,24 @@ def atualizar_preview_docx():
                     paragrafo_edits[idx] = texto_original
                 start, end = item["start"], item["end"]
                 trecho = texto_original[start:end]
-                texto_editado = paragrafo_edits[idx].replace(trecho, "█" * len(trecho), 1)
+                # Substituição com tarja
+                texto_editado = paragrafo_edits[idx][:start] + "█" * len(trecho) + paragrafo_edits[idx][end:]
                 paragrafo_edits[idx] = texto_editado
 
-        # Tarjas manuais
+        # --- Tarjas manuais ---
         for i, par in enumerate(doc.paragraphs):
             texto = paragrafo_edits.get(i, par.text)
             for trecho_manual in trechos_manuais:
-                if trecho_manual in texto:
-                    texto = texto.replace(trecho_manual, "█" * len(trecho_manual))
-                    paragrafo_edits[i] = texto
+                # Substituição case-insensitive
+                texto = re.sub(re.escape(trecho_manual), lambda m: "█" * len(m.group()), texto, flags=re.IGNORECASE)
+            paragrafo_edits[i] = texto  # garante atualização final
 
+        # Monta lista de parágrafos atualizados
         paragrafos_atualizados = [paragrafo_edits.get(i, doc.paragraphs[i].text) for i in range(len(doc.paragraphs))]
 
         return jsonify({"paragrafos": paragrafos_atualizados})
 
     except Exception as e:
-        # Aqui ajuda a diagnosticar o erro, retorna mensagem no JSON para o frontend
         return jsonify({"erro": f"Erro no servidor: {str(e)}"}), 500
 
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
@@ -627,59 +621,75 @@ def aplicar_tarjas_ocr_pdf():
 
     # IDs selecionados via checkbox
     selecionados = request.form.getlist('selecionados')
-    selecionados_set = set(selecionados)
+    selecionados_set = set(str(s) for s in selecionados)
 
     # Trechos manuais recebidos do formulário
     texto_manual = request.form.get('tarjas_manualmente_adicionadas', '').strip()
     trechos_manuais = [t.strip().lower() for t in texto_manual.split('|') if t.strip()]
 
-    tarjas_aplicadas = []
+    tarjas_aplicadas = []  # resetar tarjas anteriores
 
     for idx, imagem in enumerate(imagens_tarjadas):
-        dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
         draw = ImageDraw.Draw(imagem)
+        dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
 
-        blocos = {}
+        # Agrupar palavras por linha
+        linhas = {}
         for i in range(len(dados_ocr['text'])):
-            palavra = (dados_ocr['text'][i] or '').strip()
-            if not palavra:
-                continue
-            bloco_id = (dados_ocr['block_num'][i], dados_ocr['line_num'][i])
-            if bloco_id not in blocos:
-                blocos[bloco_id] = []
-            blocos[bloco_id].append({
-                'text': palavra,
+            linha_num = dados_ocr['line_num'][i]
+            if linha_num not in linhas:
+                linhas[linha_num] = []
+            linhas[linha_num].append({
+                'text': (dados_ocr['text'][i] or '').strip(),
                 'left': int(dados_ocr['left'][i]),
                 'top': int(dados_ocr['top'][i]),
                 'width': int(dados_ocr['width'][i]),
                 'height': int(dados_ocr['height'][i])
             })
 
-        # Aplica tarjas só nas ocorrências selecionadas
-        for ocorrencia in [o for o in ocorrencias_automaticas if o.get('pagina') == idx]:
-            if str(ocorrencia.get('id')) not in selecionados_set:
+        # Aplica tarjas automáticas selecionadas
+        for ocorrencia in [o for o in ocorrencias_automaticas if o['pagina'] == idx]:
+            if str(ocorrencia['id']) not in selecionados_set:
                 continue
-            for palavras_linha in blocos.values():
-                frase = ' '.join([p['text'] for p in palavras_linha]).lower()
-                if ocorrencia['texto'].lower() in frase:
-                    for palavra in palavras_linha:
-                        x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
-                        draw.rectangle([(x, y), (x + w, y + h)], fill='black')
-                        tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
 
-        # Aplica tarjas manuais 
+            termo_lower = ocorrencia['texto'].lower()
+            for palavras_linha in linhas.values():
+                linha_texto = ' '.join([p['text'] for p in palavras_linha]).lower()
+                if termo_lower in linha_texto:
+                    char_count = 0
+                    for palavra in palavras_linha:
+                        palavra_start = char_count
+                        palavra_end = char_count + len(palavra['text'])
+                        char_count += len(palavra['text']) + 1
+                        trecho_start = linha_texto.find(termo_lower)
+                        trecho_end = trecho_start + len(termo_lower)
+                        if palavra_end > trecho_start and palavra_start < trecho_end:
+                            x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
+                            draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+                            tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
+
+        # Aplica tarjas manuais
         for trecho in trechos_manuais:
-            for palavras_linha in blocos.values():
-                frase = ' '.join([p['text'] for p in palavras_linha]).lower()
-                similaridade = fuzz.partial_ratio(trecho, frase)
-                if similaridade >= 85:
+            trecho_lower = trecho.lower()
+            for palavras_linha in linhas.values():
+                linha_texto = ' '.join([p['text'] for p in palavras_linha]).lower()
+                if fuzz.partial_ratio(trecho_lower, linha_texto) >= 85:
+                    char_count = 0
                     for palavra in palavras_linha:
-                        x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
-                        draw.rectangle([(x, y), (x + w, y + h)], fill='black')
-                        tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
+                        palavra_start = char_count
+                        palavra_end = char_count + len(palavra['text'])
+                        char_count += len(palavra['text']) + 1
+                        trecho_start = linha_texto.find(trecho_lower)
+                        trecho_end = trecho_start + len(trecho_lower)
+                        if palavra_end > trecho_start and palavra_start < trecho_end:
+                            x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
+                            draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+                            tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
 
+    # Atualiza sessão com tarjas aplicadas
     session['tarjas_ocr'] = tarjas_aplicadas
 
+    # Salva PDF final em memória
     buffer = io.BytesIO()
     imagens_tarjadas[0].save(buffer, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
     buffer.seek(0)
@@ -692,6 +702,98 @@ def aplicar_tarjas_ocr_pdf():
     )
 
 
+@app.route('/atualizar_preview_ocr_pdf', methods=['POST'])
+def atualizar_preview_ocr_pdf():
+    try:
+        data = request.get_json(force=True)
+        selecionados = data.get("selecionados", [])
+        trechos_manuais = data.get("manuais", [])
+
+        selecionados_set = set(str(s) for s in selecionados)  # garante consistência
+
+        caminho = session.get('ocr_pdf_path')
+        ocorrencias = session.get('ocr_ocorrencias', [])
+
+        if not caminho or not os.path.exists(caminho):
+            return jsonify({"erro": "Arquivo temporário não encontrado."}), 400
+
+        # --- Carrega imagens originais do PDF (reset) ---
+        imagens = convert_from_bytes(open(caminho, 'rb').read())
+        imagens_tarjadas = [img.copy() for img in imagens]
+
+        tarjas_aplicadas = []  # limpa tarjas antigas
+
+        for idx, imagem in enumerate(imagens_tarjadas):
+            draw = ImageDraw.Draw(imagem)
+            dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
+
+            # Agrupa palavras por linha
+            linhas = {}
+            for i in range(len(dados_ocr['text'])):
+                linha_num = dados_ocr['line_num'][i]
+                if linha_num not in linhas:
+                    linhas[linha_num] = []
+                linhas[linha_num].append({
+                    'text': (dados_ocr['text'][i] or '').strip(),
+                    'left': int(dados_ocr['left'][i]),
+                    'top': int(dados_ocr['top'][i]),
+                    'width': int(dados_ocr['width'][i]),
+                    'height': int(dados_ocr['height'][i])
+                })
+
+            # --- Aplica tarjas automáticas selecionadas ---
+            for ocorrencia in [o for o in ocorrencias if o['pagina'] == idx]:
+                if str(ocorrencia['id']) not in selecionados_set:
+                    continue  # ignora desmarcadas
+
+                termo_lower = ocorrencia['texto'].lower()
+                for palavras_linha in linhas.values():
+                    linha_texto = ' '.join([p['text'] for p in palavras_linha]).lower()
+                    if termo_lower in linha_texto:
+                        char_count = 0
+                        for palavra in palavras_linha:
+                            palavra_start = char_count
+                            palavra_end = char_count + len(palavra['text'])
+                            char_count += len(palavra['text']) + 1
+                            trecho_start = linha_texto.find(termo_lower)
+                            trecho_end = trecho_start + len(termo_lower)
+                            if palavra_end > trecho_start and palavra_start < trecho_end:
+                                x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
+                                draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+                                tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
+
+            # --- Aplica tarjas manuais ---
+            for trecho in trechos_manuais:
+                trecho_lower = trecho.lower()
+                for palavras_linha in linhas.values():
+                    linha_texto = ' '.join([p['text'] for p in palavras_linha]).lower()
+                    if fuzz.partial_ratio(trecho_lower, linha_texto) >= 85:
+                        char_count = 0
+                        for palavra in palavras_linha:
+                            palavra_start = char_count
+                            palavra_end = char_count + len(palavra['text'])
+                            char_count += len(palavra['text']) + 1
+                            trecho_start = linha_texto.find(trecho_lower)
+                            trecho_end = trecho_start + len(trecho_lower)
+                            if palavra_end > trecho_start and palavra_start < trecho_end:
+                                x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
+                                draw.rectangle([(x, y), (x + w, y + h)], fill='black')
+                                tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
+
+        # --- Atualiza sessão ---
+        session['tarjas_ocr'] = tarjas_aplicadas
+
+        # --- Salva PDF atualizado em memória ---
+        pdf_mem = io.BytesIO()
+        imagens_tarjadas[0].save(pdf_mem, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
+        pdf_mem.seek(0)
+        pdf_b64 = base64.b64encode(pdf_mem.read()).decode('utf-8')
+
+        return jsonify({"pdf_data": pdf_b64})
+
+    except Exception as e:
+        app.logger.error(f"Erro ao atualizar preview OCR PDF: {e}")
+        return jsonify({"erro": f"Erro no servidor: {str(e)}"}), 500
 
 @app.route('/download_pdf_ocr')
 def download_pdf_ocr():
