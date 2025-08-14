@@ -55,8 +55,6 @@ def copiar_e_tarjar(original_doc, padroes):
 
     return novo_doc
 
-# Padrões para DOCX
-
 @app.route('/tarjar_docx', methods=['GET', 'POST'])
 def tarjar_docx_preview():
     if request.method == 'POST':
@@ -137,6 +135,8 @@ def tarjar_docx_preview():
         return render_template("preview_docx.html", ocorrencias=ocorrencias, paragrafos=paragrafos_com_tarja)
 
     return render_template("tarjar_docx.html", padroes=PADROES_SENSIVEIS.keys())
+
+
 
 @app.route("/aplicar_tarjas_docx", methods=["POST"])
 def aplicar_tarjas_docx():
@@ -389,32 +389,7 @@ def aplicar_tarjas_pdf():
         mimetype="application/pdf"
     )
 
-@app.route('/preview_pdf', methods=['POST'])
-def preview_pdf():
-    arquivo = request.files['arquivo']
-    nome_temporario = os.path.join('uploads', f"{uuid.uuid4()}.pdf")
-    arquivo.save(nome_temporario)
 
-    doc = fitz.open(nome_temporario)
-
-    pdf_data = base64.b64encode(open(nome_temporario, "rb").read()).decode('utf-8')
-
-    ocorrencias = detectar_dados(doc)  # sua função atual
-    texto_extraido = ""
-    for pagina in doc:
-        texto_extraido += pagina.get_text() + "\n"
-
-    doc.close()
-
-    session['pdf_path'] = nome_temporario
-    session['pdf_ocorrencias'] = ocorrencias
-
-    return render_template(
-        "preview_pdf.html",
-        pdf_data=pdf_data,
-        ocorrencias=ocorrencias,
-        texto_extraido=texto_extraido
-    )
 
 @app.route('/atualizar_preview_pdf', methods=['POST'])
 def atualizar_preview_pdf():
@@ -470,16 +445,6 @@ def atualizar_preview_pdf():
 
     except Exception as e:
         return jsonify({"erro": f"Erro no servidor: {str(e)}"}), 500
-
-@app.route('/download_pdf_tarjado')
-def download_pdf_tarjado():
-    path = session.get('pdf_tarjado_path', None)
-    if not path or not os.path.exists(path):
-        return "Nenhum PDF tarjado disponível.", 400
-
-    return send_file(path, as_attachment=True, download_name="documento_tarjado.pdf", mimetype="application/pdf")
-
-
 
 @app.route('/tarjar_ocr_pdf', methods=['GET', 'POST'])
 def tarjar_ocr_pdf():
