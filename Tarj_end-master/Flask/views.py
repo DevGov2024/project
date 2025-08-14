@@ -14,10 +14,15 @@ import json
 from fuzzywuzzy import fuzz
 from pdf2image import convert_from_bytes
 import pytesseract
-
+from pyzbar.pyzbar import decode
+from PIL import Image
 from PIL import Image, ImageDraw
 
 from regex_patterns import PADROES_SENSIVEIS
+
+import re
+from flask import jsonify, session
+from docx import Document
 
 # Habilita sessão para guardar dados temporários
 app.secret_key = "segredo-muito-seguro"
@@ -41,7 +46,7 @@ def copiar_e_tarjar(original_doc, padroes):
 
     return novo_doc
 
-# Padrões para DOCX
+# ----------------------------------------------------------------------------------- Padrões para DOCX ----------------------------------------------------------------------------------
 
 @app.route('/tarjar_docx', methods=['GET', 'POST'])
 def tarjar_docx_preview():
@@ -158,9 +163,6 @@ def aplicar_tarjas_docx():
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
-import re
-from flask import jsonify, session
-from docx import Document
 
 @app.route("/atualizar_preview_docx", methods=["POST"])
 def atualizar_preview_docx():
@@ -208,6 +210,8 @@ def atualizar_preview_docx():
 
     except Exception as e:
         return jsonify({"erro": f"Erro no servidor: {str(e)}"}), 500
+
+# ----------------------------------------------------------------------------------- Padrões para PDF ----------------------------------------------------------------------------------
 
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
 def tarjar_pdf():
@@ -427,6 +431,7 @@ def download_pdf_tarjado():
     return send_file(path, as_attachment=True, download_name="documento_tarjado.pdf", mimetype="application/pdf")
 
 
+# ----------------------------------------------------------------------------------- Padrões para PDF OCR ----------------------------------------------------------------------------------
 
 @app.route('/tarjar_ocr_pdf', methods=['GET', 'POST'])
 def tarjar_ocr_pdf():
@@ -458,10 +463,17 @@ def tarjar_ocr_pdf():
 
             for tipo, regex in padroes_ativos.items():
                 try:
-                    pattern = re.compile(regex, re.IGNORECASE | re.UNICODE)
+                    if isinstance(regex, re.Pattern):
+                        # Já é um regex compilado, reutiliza
+                        pattern = regex
+                    else:
+                        # É string, compila agora com flags
+                        pattern = re.compile(regex, re.IGNORECASE | re.UNICODE)
                 except re.error as e:
                     app.logger.error(f"Regex inválido para tipo '{tipo}': {e}")
                     continue
+
+        
 
                 for i, palavra in enumerate(dados_ocr['text']):
                     texto = (palavra or '').strip()
