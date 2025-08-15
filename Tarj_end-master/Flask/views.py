@@ -451,178 +451,69 @@ def tarjar_ocr_pdf():
             app.logger.error(f"Erro ao converter PDF em imagens: {e}")
             return "Erro ao processar o arquivo PDF.", 500
 
-        imagens_tarjadas = []
+        # ⚠️ NÃO TARJAR AQUI – só coletar ocorrências!
         todas_ocorrencias = []
 
-        for imagem in imagens:
-            imagens_tarjadas.append(imagem.copy())
-
-        for idx, imagem in enumerate(imagens_tarjadas):
+        for idx, imagem in enumerate(imagens):
             dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
-            draw = ImageDraw.Draw(imagem)
 
             for tipo, regex in padroes_ativos.items():
                 try:
-                    if isinstance(regex, re.Pattern):
-                        # Já é um regex compilado, reutiliza
-                        pattern = regex
-                    else:
-                        # É string, compila agora com flags
-                        pattern = re.compile(regex, re.IGNORECASE | re.UNICODE)
+                    pattern = regex if isinstance(regex, re.Pattern) else re.compile(regex, re.IGNORECASE | re.UNICODE)
                 except re.error as e:
                     app.logger.error(f"Regex inválido para tipo '{tipo}': {e}")
                     continue
-
-        
 
                 for i, palavra in enumerate(dados_ocr['text']):
                     texto = (palavra or '').strip()
                     if not texto:
                         continue
-
                     if pattern.search(texto):
-                        x = int(dados_ocr['left'][i])
-                        y = int(dados_ocr['top'][i])
-                        w = int(dados_ocr['width'][i])
-                        h = int(dados_ocr['height'][i])
-                        draw.rectangle([(x, y), (x + w, y + h)], fill='black')
-
                         todas_ocorrencias.append({
-                            "id": str(uuid.uuid4()),  # <<< Garantir ID único para seleção posterior
+                            "id": str(uuid.uuid4()),
                             "pagina": idx,
                             "tipo": tipo,
                             "texto": texto
                         })
 
-        # --- BUSCA MANUAL POR TEXTO DIGITADO PELO USUÁRIO ---
+        # --- BUSCA MANUAL POR TEXTO DIGITADO (só coletar) ---
         texto_manual = request.form.get('tarjas_manualmente_adicionadas', '').strip()
         if texto_manual:
-            trechos_manualmente_adicionados = [t.strip().lower() for t in texto_manual.split('|') if t.strip()]
-
-            for idx, imagem in enumerate(imagens_tarjadas):
+            trechos_manualmente_adicionados = [t.strip() for t in texto_manual.split('|') if t.strip()]
+            for idx, imagem in enumerate(imagens):
                 dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
-                draw = ImageDraw.Draw(imagem)
-
-                # Agrupar palavras por linha
-                linhas = {}
-                for i in range(len(dados_ocr['text'])):
-                    linha = dados_ocr['line_num'][i]
-                    if linha not in linhas:
-                        linhas[linha] = []
-                    linhas[linha].append({
-                        'text': (dados_ocr['text'][i] or '').strip(),
-                        'left': dados_ocr['left'][i],
-                        'top': dados_ocr['top'][i],
-                        'width': dados_ocr['width'][i],
-                        'height': dados_ocr['height'][i]
+                # Vamos apenas registrar a ocorrência “manual”; a tarja será desenhada na rota de preview/download
+                for trecho in trechos_manualmente_adicionados:
+                    todas_ocorrencias.append({
+                        "id": str(uuid.uuid4()),
+                        "pagina": idx,
+                        "tipo": "manual",
+                        "texto": trecho
                     })
 
-                for trecho in trechos_manualmente_adicionados:
-                    trecho_lower = trecho.lower()
-                    for palavras_linha in linhas.values():
-                        # cria o texto completo da linha com espaços, também lower
-                        linha_texto = ' '.join([p['text'] for p in palavras_linha]).lower()
-
-                        start_pos = linha_texto.find(trecho_lower)
-                        if start_pos != -1:
-                            # agora vamos mapear o trecho para as palavras que correspondem
-                            char_count = 0
-                            palavras_a_tarjar = []
-
-                            for palavra in palavras_linha:
-                                palavra_texto = palavra['text']
-                                palavra_len = len(palavra_texto)
-                                # posição inicial e final da palavra no texto da linha
-                                palavra_start = char_count
-                                palavra_end = char_count + palavra_len
-
-                                # Verifica se a palavra está dentro do trecho a tarjar
-                                trecho_end_pos = start_pos + len(trecho_lower)
-
-                                # Condição: palavra intersecta o trecho a tarjar
-                                if (palavra_end > start_pos) and (palavra_start < trecho_end_pos):
-                                    palavras_a_tarjar.append(palavra)
-
-                                # atualiza contador (considera espaço depois da palavra)
-                                char_count += palavra_len + 1
-
-                            # pinta só as palavras dentro do trecho
-                            for palavra in palavras_a_tarjar:
-                                x = int(palavra['left'])
-                                y = int(palavra['top'])
-                                w = int(palavra['width'])
-                                h = int(palavra['height'])
-                                draw.rectangle([(x, y), (x + w, y + h)], fill='black')
-
-                            todas_ocorrencias.append({
-                                "id": str(uuid.uuid4()),  # <<< Garantir ID único
-                                "pagina": idx,
-                                "tipo": "manual",
-                                "texto": trecho
-                            })
-
-        # --- TARJAS MANUAIS (coordenadas) ---
-        tarjas_manuais_str = request.form.get('tarjas_manuais', '[]')
-        try:
-            tarjas_manuais = json.loads(tarjas_manuais_str)
-            if not isinstance(tarjas_manuais, list):
-                raise ValueError("tarjas_manuais não é uma lista")
-        except (json.JSONDecodeError, ValueError) as e:
-            app.logger.error(f"Erro ao ler tarjas manuais JSON: {e}")
-            tarjas_manuais = []
-
-        for tarja in tarjas_manuais:
-            pagina = tarja.get('pagina')
-            x = tarja.get('x')
-            y = tarja.get('y')
-            w = tarja.get('w')
-            h = tarja.get('h')
-
-            if (
-                isinstance(pagina, int) and 0 <= pagina < len(imagens_tarjadas) and
-                all(isinstance(coord, (int, float)) for coord in [x, y, w, h])
-            ):
-                draw = ImageDraw.Draw(imagens_tarjadas[pagina])
-                draw.rectangle([(int(x), int(y)), (int(x + w), int(y + h))], fill='black')
-            else:
-                app.logger.warning(f"Tarja manual inválida ignorada: {tarja}")
-
-        # Salvar PDF temporário
-        pdf_tarjado = io.BytesIO()
-        try:
-            imagens_tarjadas[0].save(pdf_tarjado, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
-        except Exception as e:
-            app.logger.error(f"Erro ao salvar PDF tarjado: {e}")
-            return "Erro ao gerar o PDF tarjado.", 500
-
-        pdf_tarjado.seek(0)
-
+        # ✅ Salvar o PDF ORIGINAL (sem tarjas) para ser a base do preview e do download
         diretorio_temp = os.path.join(app.root_path, 'arquivos_temp')
         os.makedirs(diretorio_temp, exist_ok=True)
-        nome_arquivo = f"{uuid.uuid4()}.pdf"
+        nome_arquivo = f"{uuid.uuid4()}_original.pdf"
         caminho_arquivo = os.path.join(diretorio_temp, nome_arquivo)
-
         with open(caminho_arquivo, 'wb') as f:
-            f.write(pdf_tarjado.read())
+            f.write(pdf_bytes)
 
-        pdf_tarjado.seek(0)
-        pdf_base64 = base64.b64encode(pdf_tarjado.read()).decode('utf-8')
-
-        session['ocr_pdf_path'] = caminho_arquivo
+        # Guardar em sessão
+        session['ocr_original_pdf_path'] = caminho_arquivo
         session['ocr_ocorrencias'] = todas_ocorrencias
 
+        # Renderizar preview (o JS já chama /atualizar_preview_ocr_pdf na carga)
         return render_template(
             "preview_ocr.html",
-            ocorrencias=todas_ocorrencias,
-            pdf_b64=pdf_base64
+            ocorrencias=todas_ocorrencias
         )
 
     return render_template('tarjar_ocr_pdf.html', padroes=PADROES_SENSIVEIS.keys())
 
-    
 @app.route('/aplicar_tarjas_ocr_pdf', methods=['POST'])
 def aplicar_tarjas_ocr_pdf():
-    caminho = session.get('ocr_pdf_path')
+    caminho = session.get('ocr_original_pdf_path')  # <<<< usar o ORIGINAL
     ocorrencias_automaticas = session.get('ocr_ocorrencias', [])
 
     if not caminho or not os.path.exists(caminho):
@@ -631,21 +522,19 @@ def aplicar_tarjas_ocr_pdf():
     imagens = convert_from_bytes(open(caminho, 'rb').read())
     imagens_tarjadas = [img.copy() for img in imagens]
 
-    # IDs selecionados via checkbox
     selecionados = request.form.getlist('selecionados')
     selecionados_set = set(str(s) for s in selecionados)
 
-    # Trechos manuais recebidos do formulário
+    # Campo oculto unificado (pipe-separado)
     texto_manual = request.form.get('tarjas_manualmente_adicionadas', '').strip()
     trechos_manuais = [t.strip().lower() for t in texto_manual.split('|') if t.strip()]
 
-    tarjas_aplicadas = []  # resetar tarjas anteriores
+    tarjas_aplicadas = []
 
     for idx, imagem in enumerate(imagens_tarjadas):
         draw = ImageDraw.Draw(imagem)
         dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
 
-        # Agrupar palavras por linha
         linhas = {}
         for i in range(len(dados_ocr['text'])):
             linha_num = dados_ocr['line_num'][i]
@@ -659,49 +548,46 @@ def aplicar_tarjas_ocr_pdf():
                 'height': int(dados_ocr['height'][i])
             })
 
-        # Aplica tarjas automáticas selecionadas
+        # Selecionados automáticos
         for ocorrencia in [o for o in ocorrencias_automaticas if o['pagina'] == idx]:
             if str(ocorrencia['id']) not in selecionados_set:
                 continue
-
             termo_lower = ocorrencia['texto'].lower()
             for palavras_linha in linhas.values():
                 linha_texto = ' '.join([p['text'] for p in palavras_linha]).lower()
                 if termo_lower in linha_texto:
                     char_count = 0
+                    trecho_start = linha_texto.find(termo_lower)
+                    trecho_end = trecho_start + len(termo_lower)
                     for palavra in palavras_linha:
                         palavra_start = char_count
                         palavra_end = char_count + len(palavra['text'])
                         char_count += len(palavra['text']) + 1
-                        trecho_start = linha_texto.find(termo_lower)
-                        trecho_end = trecho_start + len(termo_lower)
                         if palavra_end > trecho_start and palavra_start < trecho_end:
                             x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
                             draw.rectangle([(x, y), (x + w, y + h)], fill='black')
                             tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
 
-        # Aplica tarjas manuais
+        # Manuais
         for trecho in trechos_manuais:
             trecho_lower = trecho.lower()
             for palavras_linha in linhas.values():
                 linha_texto = ' '.join([p['text'] for p in palavras_linha]).lower()
                 if fuzz.partial_ratio(trecho_lower, linha_texto) >= 85:
                     char_count = 0
+                    trecho_start = linha_texto.find(trecho_lower)
+                    trecho_end = trecho_start + len(trecho_lower)
                     for palavra in palavras_linha:
                         palavra_start = char_count
                         palavra_end = char_count + len(palavra['text'])
                         char_count += len(palavra['text']) + 1
-                        trecho_start = linha_texto.find(trecho_lower)
-                        trecho_end = trecho_start + len(trecho_lower)
                         if palavra_end > trecho_start and palavra_start < trecho_end:
                             x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
                             draw.rectangle([(x, y), (x + w, y + h)], fill='black')
                             tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
 
-    # Atualiza sessão com tarjas aplicadas
     session['tarjas_ocr'] = tarjas_aplicadas
 
-    # Salva PDF final em memória
     buffer = io.BytesIO()
     imagens_tarjadas[0].save(buffer, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
     buffer.seek(0)
@@ -713,33 +599,29 @@ def aplicar_tarjas_ocr_pdf():
         mimetype="application/pdf"
     )
 
-
 @app.route('/atualizar_preview_ocr_pdf', methods=['POST'])
 def atualizar_preview_ocr_pdf():
     try:
         data = request.get_json(force=True)
         selecionados = data.get("selecionados", [])
         trechos_manuais = data.get("manuais", [])
+        selecionados_set = set(str(s) for s in selecionados)
 
-        selecionados_set = set(str(s) for s in selecionados)  # garante consistência
-
-        caminho = session.get('ocr_pdf_path')
+        caminho = session.get('ocr_original_pdf_path')  # <<<< usar o ORIGINAL
         ocorrencias = session.get('ocr_ocorrencias', [])
 
         if not caminho or not os.path.exists(caminho):
             return jsonify({"erro": "Arquivo temporário não encontrado."}), 400
 
-        # --- Carrega imagens originais do PDF (reset) ---
         imagens = convert_from_bytes(open(caminho, 'rb').read())
         imagens_tarjadas = [img.copy() for img in imagens]
-
-        tarjas_aplicadas = []  # limpa tarjas antigas
+        tarjas_aplicadas = []
 
         for idx, imagem in enumerate(imagens_tarjadas):
             draw = ImageDraw.Draw(imagem)
             dados_ocr = pytesseract.image_to_data(imagem, lang='por', output_type=pytesseract.Output.DICT)
 
-            # Agrupa palavras por linha
+            # Agrupar por linha (igual ao seu código)
             linhas = {}
             for i in range(len(dados_ocr['text'])):
                 linha_num = dados_ocr['line_num'][i]
@@ -753,49 +635,46 @@ def atualizar_preview_ocr_pdf():
                     'height': int(dados_ocr['height'][i])
                 })
 
-            # --- Aplica tarjas automáticas selecionadas ---
+            # Tarjas automáticas SELECIONADAS
             for ocorrencia in [o for o in ocorrencias if o['pagina'] == idx]:
                 if str(ocorrencia['id']) not in selecionados_set:
-                    continue  # ignora desmarcadas
-
+                    continue
                 termo_lower = ocorrencia['texto'].lower()
                 for palavras_linha in linhas.values():
                     linha_texto = ' '.join([p['text'] for p in palavras_linha]).lower()
                     if termo_lower in linha_texto:
                         char_count = 0
+                        trecho_start = linha_texto.find(termo_lower)
+                        trecho_end = trecho_start + len(termo_lower)
                         for palavra in palavras_linha:
                             palavra_start = char_count
                             palavra_end = char_count + len(palavra['text'])
                             char_count += len(palavra['text']) + 1
-                            trecho_start = linha_texto.find(termo_lower)
-                            trecho_end = trecho_start + len(termo_lower)
                             if palavra_end > trecho_start and palavra_start < trecho_end:
                                 x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
                                 draw.rectangle([(x, y), (x + w, y + h)], fill='black')
                                 tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
 
-            # --- Aplica tarjas manuais ---
+            # Tarjas manuais (texto livre do preview)
             for trecho in trechos_manuais:
                 trecho_lower = trecho.lower()
                 for palavras_linha in linhas.values():
                     linha_texto = ' '.join([p['text'] for p in palavras_linha]).lower()
                     if fuzz.partial_ratio(trecho_lower, linha_texto) >= 85:
                         char_count = 0
+                        trecho_start = linha_texto.find(trecho_lower)
+                        trecho_end = trecho_start + len(trecho_lower)
                         for palavra in palavras_linha:
                             palavra_start = char_count
                             palavra_end = char_count + len(palavra['text'])
                             char_count += len(palavra['text']) + 1
-                            trecho_start = linha_texto.find(trecho_lower)
-                            trecho_end = trecho_start + len(trecho_lower)
                             if palavra_end > trecho_start and palavra_start < trecho_end:
                                 x, y, w, h = palavra['left'], palavra['top'], palavra['width'], palavra['height']
                                 draw.rectangle([(x, y), (x + w, y + h)], fill='black')
                                 tarjas_aplicadas.append({'pagina': idx, 'texto': palavra['text']})
 
-        # --- Atualiza sessão ---
         session['tarjas_ocr'] = tarjas_aplicadas
 
-        # --- Salva PDF atualizado em memória ---
         pdf_mem = io.BytesIO()
         imagens_tarjadas[0].save(pdf_mem, format="PDF", save_all=True, append_images=imagens_tarjadas[1:])
         pdf_mem.seek(0)

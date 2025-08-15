@@ -210,3 +210,77 @@ footer {
 .btn-baixar:hover {
   background-color: #5a6268;
 }
+/* Botões padronizados do STGC */
+.btn-stgc {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem; /* espaço entre ícone e texto */
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--raio-borda);
+  min-width: 240px; /* largura mínima igual para todos */
+}
+
+/* Primário - Laranja SP */
+.btn-stgc-primary {
+  background-color: var(--cor-laranja-sp);
+  border-color: var(--cor-laranja-sp);
+  color: white;
+}
+.btn-stgc-primary:hover {
+  background-color: #E65A00;
+  border-color: #E65A00;
+  color: white;
+}
+
+/* Secundário - Cinza padrão */
+.btn-stgc-secondary {
+  background-color: #6C757D;
+  border-color: #6C757D;
+  color: white;
+}
+.btn-stgc-secondary:hover {
+  background-color: #5A6268;
+  border-color: #5A6268;
+  color: white;
+}
+
+/* Botões padronizados - Ação Final (Aplicar e Cancelar) */
+.btn-stgc-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem; /* espaço entre ícone e texto */
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--raio-borda);
+  min-width: 260px; /* largura mínima igual para todos */
+}
+
+/* Botão primário - Aplicar Tarjas */
+.btn-stgc-action-primary {
+  background-color: var(--cor-laranja-sp);
+  border-color: var(--cor-laranja-sp);
+  color: white;
+}
+.btn-stgc-action-primary:hover {
+  background-color: #E65A00;
+  border-color: #E65A00;
+  color: white;
+}
+
+/* Botão secundário - Cancelar */
+.btn-stgc-action-secondary {
+  background-color: #6C757D;
+  border-color: #6C757D;
+  color: white;
+}
+.btn-stgc-action-secondary:hover {
+  background-color: #5A6268;
+  border-color: #5A6268;
+  color: white;
+}
+

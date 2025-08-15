@@ -57,22 +57,27 @@
           </div>
           <hr>
 
-          <!-- Botões -->
-            <div class="d-flex justify-content-center align-items-center mt-4">
-             <button type="submit" class="btn btn-primary">
-                <i class="bi bi-shield-fill-x me-2"></i>Aplicar Tarjas e Fazer Download
+          <div class="d-flex justify-content-center align-items-center mt-4 gap-3 flex-wrap">
+            <button type="submit" class="btn btn-stgc-action btn-stgc-action-primary">
+            <i class="bi bi-shield-fill-x"></i> Aplicar Tarjas e Fazer Download
             </button>
+            <a href="{{ url_for('tarjar_ocr_pdf') }}" class="btn btn-stgc-action btn-stgc-action-secondary">
+            <i class="bi bi-x-circle"></i> Cancelar Solicitação
+          </a>
+        </div>
 
-            <a href="{{ url_for('tarjar_ocr_pdf') }}" class="btn btn-secondary"> Cancelar Solicitação</a>
-          </div>
         </form>
       </div>
     </div>
 
-    <!-- Script para adicionar e visualizar tarjas manuais -->
-   <script>
-let tarjasManuais = [];
+<script>
+let tarjasManuais = []; // {id, trecho}
 let idCounter = 10000;
+
+function syncHiddenManuals() {
+  const val = tarjasManuais.map(t => t.trecho).join('|');
+  document.getElementById("manualTarjasHidden").value = val;
+}
 
 function adicionarTarjaManual() {
   const input = document.getElementById("trechoManual");
@@ -82,10 +87,9 @@ function adicionarTarjaManual() {
     return;
   }
 
-  const novaTarja = { id: idCounter++, pagina: 0, trecho: valor };
+  const novaTarja = { id: idCounter++, trecho: valor };
   tarjasManuais.push(novaTarja);
-
-  document.getElementById("manualTarjasHidden").value = JSON.stringify(tarjasManuais);
+  syncHiddenManuals();
 
   const li = document.createElement("li");
   li.className = "list-group-item d-flex justify-content-between align-items-center";
@@ -96,7 +100,7 @@ function adicionarTarjaManual() {
   btnRemover.className = "btn btn-sm btn-outline-danger ms-2";
   btnRemover.onclick = function () {
     tarjasManuais = tarjasManuais.filter(t => t.id !== novaTarja.id);
-    document.getElementById("manualTarjasHidden").value = JSON.stringify(tarjasManuais);
+    syncHiddenManuals();
     li.remove();
     atualizarPreviewOCR();
   };
@@ -122,8 +126,7 @@ async function atualizarPreviewOCR() {
   const selecionados = Array.from(document.querySelectorAll('input[name="selecionados"]:checked'))
                            .map(i => i.value);
 
-  // Envia apenas os trechos manuais (texto) para o backend
-  const manuais = tarjasManuais.map(t => t.trecho);
+  const manuais = tarjasManuais.map(t => t.trecho); // enviado no body do preview
 
   try {
     const resp = await fetch('/atualizar_preview_ocr_pdf', {

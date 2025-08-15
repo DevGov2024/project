@@ -47,14 +47,15 @@
                 </div>
                 <hr>
 
-                <div class="d-flex justify-content-center align-items-center mt-4">
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-shield-fill-x me-2"></i>Aplicar Tarjas e Fazer Download
+                <div class="d-flex justify-content-center align-items-center mt-4 gap-3 flex-wrap">
+                    <button type="submit" class="btn btn-stgc-action btn-stgc-action-primary">
+                    <i class="bi bi-shield-fill-x"></i> Aplicar Tarjas e Fazer Download
                     </button>
-                    <a href="{{ url_for('tarjar_pdf') }}" class="btn btn-secondary btn-lg">
-                        <i class="bi bi-x-circle me-2"></i>Cancelar Solicitação
+                    <a href="{{ url_for('tarjar_pdf') }}" class="btn btn-stgc-action btn-stgc-action-secondary">
+                    <i class="bi bi-x-circle"></i> Cancelar Solicitação
                     </a>
                 </div>
+
             </form>
         </div>
     </section>
