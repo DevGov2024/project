@@ -599,6 +599,7 @@ def aplicar_tarjas_ocr_pdf():
         mimetype="application/pdf"
     )
 
+
 @app.route('/atualizar_preview_ocr_pdf', methods=['POST'])
 def atualizar_preview_ocr_pdf():
     try:
