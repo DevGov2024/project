@@ -1,20 +1,12 @@
 from main import app
 from flask import Flask, render_template, request, send_file, redirect, url_for, session, jsonify
 import re
-import tempfile
 import os
-import fitz  #
 from docx import Document
-import io
 from historico_utils import salvar_envio
-import uuid
-import base64
 from docx.shared import RGBColor
-import json
 from fuzzywuzzy import fuzz
 from pdf2image import convert_from_bytes
-import pytesseract
-from pyzbar.pyzbar import decode
 from PIL import Image
 from PIL import Image, ImageDraw
 from services.ocr_pdf_service import OcrPdfService
@@ -32,7 +24,6 @@ def homepage():
     
      return render_template("index.html")
     
-
 def copiar_e_tarjar(original_doc, padroes):
     novo_doc = Document()
 
@@ -47,7 +38,19 @@ def copiar_e_tarjar(original_doc, padroes):
 
 PADROES_SENSIVEIS = {
     "CPF": r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b",
-    "RG": r"\b\d{2}\.\d{3}\.\d{3}-\d{1}\b"
+    "RG": r"\b\d{2}\.\d{3}\.\d{3}-\d{1}\b",
+    "CNPJ": r"\b\d{2}\.\d{3}\.\d{3}/\d{4}-\d{2}\b",
+    "Passaporte": r"\b[A-Z]{2}\d{6}\b",
+    "CartaoCredito": r"\b(?:\d[ -]*?){13,16}\b",
+    "AgenciaConta": r"\b\d{4,5}-\d{1}\s\d{4,8}-\d{1}\b",
+    "Telefone": r"\b\(?\d{2}\)?\s?\d{4,5}-\d{4}\b",
+    "Email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+    "CEP": r"\b\d{5}-\d{3}\b",
+    "Endereco": r"\b(Rua|Avenida|Av\.|Travessa|Tv\.|Rodovia|Praça)\s+[A-Za-zÀ-ÿ0-9\s,.-]+\b",
+    "Nome": r"\b([A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõç]+(?:\s+[A-ZÁÉÍÓÚÂÊÔÃÕ][a-záéíóúâêôãõç]+)+)\b",
+    "PlacaVeiculo": r"\b([A-Z]{3}-\d{4}|[A-Z]{3}\d[A-Z]\d{2})\b",
+    "PIS": r"\b\d{3}\.\d{5}\.\d{2}-\d\b",
+    "TituloEleitor": r"\b\d{4}\s\d{4}\s\d{4}\b",
 }
 # ----------------------------------------------------------------------------------- Padrões para DOCX ----------------------------------------------------------------------------------
 
@@ -116,11 +119,13 @@ def atualizar_preview_docx_route():
 
 # ----------------------------------------------------------------------------------- Padrões para PDF ----------------------------------------------------------------------------------
 
-@app.route('/tarjar_pdf', methods=['GET', 'POST'])
+@app.route('/tarjar_pdf', methods=['GET', 'POST']) 
 def tarjar_pdf_route():
     if request.method == 'POST':
         arquivo = request.files.get('pdffile')
         tipos_selecionados = request.form.getlist('tipos')
+        usar_spacy = request.form.get('usar_spacy') == '1'
+        usar_ocr = request.form.get('usar_ocr') == '1'
 
         if not arquivo or not arquivo.filename.endswith('.pdf'):
             return "Arquivo inválido. Envie um .pdf.", 400
@@ -128,7 +133,8 @@ def tarjar_pdf_route():
         padroes_ativos = {k: v for k, v in PADROES_SENSIVEIS.items() if k in tipos_selecionados}
 
         pdf_bytes = arquivo.read()
-        ocorrencias, pdf_b64, temp_path = gerar_preview_pdf(pdf_bytes, padroes_ativos)
+
+        ocorrencias, pdf_b64, temp_path = gerar_preview_pdf(pdf_bytes, padroes_ativos, usar_spacy)
 
         session['pdf_path'] = temp_path
         session['pdf_ocorrencias'] = ocorrencias
@@ -151,6 +157,14 @@ def aplicar_tarjas_pdf_route():
         return "Erro: arquivo temporário não encontrado.", 400
 
     mem_file = aplicar_tarjas_pdf(caminho, ocorrencias, selecionados, trechos_manuais, preservar_logo)
+
+    # --- DELEÇÃO AUTOMÁTICA DO TEMPORÁRIO ---
+    try:
+        os.remove(caminho)
+        session.pop('pdf_path', None)
+        session.pop('pdf_ocorrencias', None)
+    except Exception as e:
+        print(f"Erro ao remover arquivo temporário: {e}")
 
     return send_file(
         mem_file,
@@ -205,7 +219,6 @@ def download_pdf_ocr():
     if not caminho or not os.path.exists(caminho):
         return "Arquivo não encontrado.", 404
     return send_file(caminho, as_attachment=True, download_name="pdf_tarjado_ocr.pdf")
-
 
 @app.route('/ver_pdf_ocr')
 def ver_pdf_ocr():
