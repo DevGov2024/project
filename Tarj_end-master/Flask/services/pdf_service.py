@@ -10,7 +10,7 @@ import pytesseract
 import spacy
 
 # Carregar modelo do spaCy
-nlp = spacy.load("pt_core_news_sm")
+nlp = spacy.load("pt_core_news_md")
 
 def detectar_com_spacy(texto):
     """

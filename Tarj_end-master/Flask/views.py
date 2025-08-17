@@ -53,12 +53,12 @@ PADROES_SENSIVEIS = {
     "TituloEleitor": r"\b\d{4}\s\d{4}\s\d{4}\b",
 }
 # ----------------------------------------------------------------------------------- Padrões para DOCX ----------------------------------------------------------------------------------
-
 @app.route('/tarjar_docx', methods=['GET', 'POST'])
 def tarjar_docx_preview():
     if request.method == 'POST':
         arquivo = request.files.get("docxfile")
         selecionados = request.form.getlist("itens")
+        usar_spacy = "usar_spacy" in request.form  # <-- checkbox
 
         if not arquivo or not arquivo.filename.endswith('.docx'):
             return "Arquivo inválido. Envie um .docx.", 400
@@ -66,10 +66,13 @@ def tarjar_docx_preview():
         padroes_ativos = {k: v for k, v in PADROES_SENSIVEIS.items() if k in selecionados}
 
         conteudo_bytes = arquivo.read()
-        ocorrencias, paragrafos, temp_path = encontrar_ocorrencias_docx(conteudo_bytes, padroes_ativos)
+        ocorrencias, paragrafos, temp_path = encontrar_ocorrencias_docx(
+            conteudo_bytes, padroes_ativos, usar_spacy
+        )
 
         session['doc_ocorrencias'] = ocorrencias
         session['doc_path'] = temp_path
+        session['usar_spacy'] = usar_spacy
 
         return render_template("preview_docx.html", ocorrencias=ocorrencias, paragrafos=paragrafos)
 
@@ -106,11 +109,14 @@ def atualizar_preview_docx_route():
 
         ocorrencias = session.get("doc_ocorrencias", [])
         caminho = session.get("doc_path", None)
+        usar_spacy = session.get("usar_spacy", False)  # <-- resgata escolha
 
         if not caminho or not os.path.exists(caminho):
             return jsonify({"erro": "Arquivo temporário não encontrado."}), 400
 
-        paragrafos_atualizados = atualizar_preview_docx(caminho, ocorrencias, selecionados, trechos_manuais)
+        paragrafos_atualizados = atualizar_preview_docx(
+            caminho, ocorrencias, selecionados, trechos_manuais, usar_spacy
+        )
 
         return jsonify({"paragrafos": paragrafos_atualizados})
 
