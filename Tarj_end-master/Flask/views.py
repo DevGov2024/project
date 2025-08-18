@@ -12,6 +12,7 @@ from PIL import Image, ImageDraw
 from services.ocr_pdf_service import OcrPdfService
 from regex_patterns import PADROES_SENSIVEIS
 import re
+import fitz
 from flask import jsonify, session
 from docx import Document
 from services.docx_service import encontrar_ocorrencias_docx, aplicar_tarjas_docx, atualizar_preview_docx
@@ -232,3 +233,68 @@ def ver_pdf_ocr():
     if not caminho or not os.path.exists(caminho):
         return "Arquivo não encontrado.", 404
     return send_file(caminho, mimetype='application/pdf')
+
+
+
+
+@app.route('/tarjar_pdf_grande', methods=['GET', 'POST'])
+def tarjar_pdf_grande():
+    if request.method == 'POST':
+        arquivo = request.files.get("arquivo")
+        if not arquivo:
+            return "Erro: Nenhum arquivo enviado.", 400
+
+        caminho = os.path.join("uploads", arquivo.filename)
+        arquivo.save(caminho)
+
+        try:
+            doc = fitz.open(caminho)
+        except Exception as e:
+            return f"Erro ao abrir o PDF: {str(e)}", 500
+
+        total_paginas = doc.page_count
+        ocorrencias = []
+
+        # Apenas coleta os termos (sem carregar imagens pesadas)
+        for num, pagina in enumerate(doc):
+            texto = pagina.get_text("text")
+            for termo in ["CPF", "RG", "Nome"]:  # seus termos sensíveis
+                if termo.lower() in texto.lower():
+                    ocorrencias.append({
+                        "pagina": num + 1,
+                        "termo": termo
+                    })
+
+        return render_template(
+            "preview_pdf_grande.html",
+            nome_arquivo=arquivo.filename,
+            total_paginas=total_paginas,
+            ocorrencias=ocorrencias
+        )
+
+    return render_template("upload_pdf_grande.html")
+
+
+
+
+@app.route('/aplicar_tarjas_pdf_grande', methods=['POST'])
+def aplicar_tarjas_pdf_grande():
+    nome_arquivo = request.form.get("arquivo")
+    caminho = os.path.join("uploads", nome_arquivo)
+
+    try:
+        doc = fitz.open(caminho)
+        for pagina in doc:
+            for termo in ["CPF", "RG", "Nome"]:
+                areas = pagina.search_for(termo)
+                for area in areas:
+                    pagina.add_redact_annot(area, fill=(0,0,0))
+            pagina.apply_redactions()
+
+        saida = os.path.join("outputs", f"tarjado_{nome_arquivo}")
+        doc.save(saida, deflate=True)
+        doc.close()
+
+        return f"PDF grande processado com sucesso! Arquivo salvo em {saida}"
+    except Exception as e:
+        return f"Erro ao aplicar tarjas: {str(e)}", 500

@@ -1,0 +1,15 @@
+<h2>Resumo do PDF</h2>
+<p><b>Arquivo:</b> {{ nome_arquivo }}</p>
+<p><b>Total de páginas:</b> {{ total_paginas }}</p>
+
+<h3>Ocorrências encontradas:</h3>
+<ul>
+{% for item in ocorrencias %}
+   <li>Página {{ item.pagina }} → "{{ item.termo }}"</li>
+{% endfor %}
+</ul>
+
+<form method="POST" action="/aplicar_tarjas_pdf_grande">
+    <input type="hidden" name="arquivo" value="{{ nome_arquivo }}">
+    <button type="submit">Aplicar Tarjas em Todo o Documento</button>
+</form>
