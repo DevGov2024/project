@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+
+{% block title %}Resultados – Tarja{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+  <h1 class="mb-3">Dados sensíveis encontrados</h1>
+  <p class="text-muted">Arquivo: <code>{{ nome_arquivo }}</code></p>
+
+  {% if not achados %}
+    <div class="alert alert-info">Nenhum dado sensível foi detectado com os padrões atuais.</div>
+    <a href="{{ url_for('homepage') }}" class="btn btn-secondary">Voltar</a>
+  {% else %}
+
+    <!-- Filtro por tipo de dado -->
+    <div class="mb-3">
+      <label class="form-label fw-bold">Filtrar tipos de dados:</label><br>
+      {% set tipos_unicos = achados|map(attribute='tipo')|unique %}
+      {% for tipo in tipos_unicos %}
+        <input type="checkbox" class="tipo-filter" value="{{ tipo }}" id="chkTipo{{ loop.index }}" checked>
+        <label for="chkTipo{{ loop.index }}">{{ tipo }}</label>&nbsp;&nbsp;
+      {% endfor %}
+    </div>
+
+    <!-- Tarja manual -->
+    <div class="mb-3">
+      <label>Adicionar tarja manual:</label>
+      <div class="input-group">
+        <input type="text" name="manual_values" class="form-control" placeholder="Ex: Nome da empresa, endereço...">
+        <input type="number" name="manual_page" class="form-control" placeholder="Página" min="1">
+        <button type="button" class="btn btn-secondary" onclick="addManual()">Adicionar</button>
+      </div>
+    </div>
+
+    <form method="POST" action="{{ url_for('redact') }}">
+      <input type="hidden" name="file_path" value="{{ file_path }}">
+     
+      <div id="manual_container"></div>
+
+      <div class="table-responsive">
+        <table class="table table-sm table-bordered align-middle">
+          <thead class="table-light">
+            <tr>
+              <th style="width:36px;">
+                <input type="checkbox" id="checkAll">
+              </th>
+              <th>Página</th>
+              <th>Tipo</th>
+              <th>Valor</th>
+              <th>Contexto</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in achados %}
+            <tr data-tipo="{{ a.tipo }}">
+              <td>
+                <input type="checkbox" name="targets" value="{{ a.pagina }}|{{ a.tipo }}|{{ a.valor }}" checked>
+              </td>
+              <td>{{ a.pagina }}</td>
+              <td>{{ a.tipo }}</td>
+              <td><code>{{ a.valor }}</code></td>
+              <td class="text-muted">{{ a.contexto }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary">Aplicar tarjas e baixar PDF</button>
+        <a href="{{ url_for('homepage') }}" class="btn btn-secondary">Fazer novo upload</a>
+      </div>
+    </form>
+  {% endif %}
+</div>
+
+<script>
+  // Checkbox mestre
+  const masterCheck = document.getElementById('checkAll');
+  const checkboxes = document.querySelectorAll('input[name="targets"]');
+  masterCheck.addEventListener('change', () => {
+    checkboxes.forEach(cb => cb.checked = masterCheck.checked);
+  });
+
+  // Filtro por tipo de dado
+  const filtros = document.querySelectorAll('.tipo-filter');
+  filtros.forEach(f => {
+    f.addEventListener('change', () => {
+      const tipo = f.value;
+      const linhas = document.querySelectorAll(`tr[data-tipo="${tipo}"]`);
+      linhas.forEach(linha => linha.style.display = f.checked ? '' : 'none');
+    });
+  });
+
+  // Adicionar tarja manual
+  function addManual() {
+    let val = document.querySelector('input[name="manual_values"]').value.trim();
+    let page = document.querySelector('input[name="manual_page"]').value;
+    if(!val || !page) return alert("Preencha valor e página");
+
+    let container = document.getElementById('manual_container');
+    let input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'targets';
+    input.value = page + "|Manual|" + val;
+    container.appendChild(input);
+
+    // Limpar campos
+    document.querySelector('input[name="manual_values"]').value = '';
+    document.querySelector('input[name="manual_page"]').value = '';
+  }
+</script>
+{% endblock %}

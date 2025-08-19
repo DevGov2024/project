@@ -1,52 +1,84 @@
-{% extends "base.html" %}
-
-{% block title %}Página Inicial - STGC{% endblock %}
-
+{% extends "base.html" %} {% block title %}Página Inicial - STGC{% endblock %}
 {% block content %}
- <section class="hero-section text-center">
-            <h1 class="display-3">Ferramentas para Tarjamento de Documentos Oficiais</h1>
-            <p class="lead">Envie e tarje documentos da Prefeitura de forma simples e segura.</p>
-        </section>
+<section class="hero-section text-center">
+  <h1 class="display-3">Ferramentas para Tarjamento de Documentos Oficiais</h1>
+  <p class="lead">
+    Envie e tarje documentos da Prefeitura de forma simples e segura.
+  </p>
+</section>
 
-        <section class="tools-section">
-            <div class="row g-4">
+<section class="tools-section">
+  <div class="row g-4">
+    <div class="col-lg-4 col-md-6">
+      <a href="./tarjar_pdf" class="text-decoration-none text-dark">
+        <div class="tool-card">
+          <div class="icon-container">
+            <i class="bi bi-cloud-upload-fill"></i>
+          </div>
+          <h2>Enviar Documento em PDF</h2>
+          <p>Faça upload de novos arquivos PDF para tarjar.</p>
+        </div>
+      </a>
+    </div>
 
-                <div class="col-lg-4 col-md-6">
-                    <a href="./tarjar_pdf" class="text-decoration-none text-dark">
-                        <div class="tool-card">
-                            <div class="icon-container">
-                                <i class="bi bi-cloud-upload-fill"></i>
-                            </div>
-                            <h2>Enviar Documento em PDF</h2>
-                            <p>Faça upload de novos arquivos PDF para tarjar.</p>
-                        </div>
-                    </a>
-                </div>
+    <div class="col-lg-4 col-md-6">
+      <form
+        id="uploadForm"
+        action="/upload"
+        method="POST"
+        enctype="multipart/form-data"
+        class="text-decoration-none text-dark"
+      >
+        <div
+          class="tool-card"
+          onclick="document.getElementById('fileInput').click()"
+        >
+          <div class="icon-container">
+            <i class="bi bi-cloud-upload-fill"></i>
+          </div>
+          <h2 class="h5 mb-1">
+            Enviar Documento em PDF grande
+          </h2>
+          <p class="mb-0 text-muted">
+            Faça upload do PDF para detectar dados sensíveis.
+          </p>
+        </div>
+        <input
+          id="fileInput"
+          type="file"
+          name="file"
+          accept="application/pdf"
+          style="display: none"
+          onchange="document.getElementById('uploadForm').submit()"
+        />
+      </form>
+    </div>
 
-                <div class="col-lg-4 col-md-6">
-                    <a href="./tarjar_docx" class="text-decoration-none text-dark">
-                        <div class="tool-card">
-                            <div class="icon-container">
-                                <i class="bi bi-cloud-upload-fill"></i>
-                            </div>
-                            <h2>Enviar Documento em DOCX</h2>
-                            <p>Faça o upload de novos arquivos DOCX para tarjar.</p>
-                </div>
-                  </a>
-            </div>
+    <div class="col-lg-4 col-md-6">
+      <a href="./tarjar_docx" class="text-decoration-none text-dark">
+        <div class="tool-card">
+          <div class="icon-container">
+            <i class="bi bi-cloud-upload-fill"></i>
+          </div>
+          <h2>Enviar Documento em DOCX</h2>
+          <p>Faça o upload de novos arquivos DOCX para tarjar.</p>
+        </div>
+      </a>
+    </div>
 
-            <div class="col-lg-4 col-md-6">
-                    <a href="./tarjar_ocr_pdf" class="text-decoration-none text-dark">
-                        <div class="tool-card">
-                            <div class="icon-container">
-                                <i class="bi bi-cloud-upload-fill"></i>
-                            </div>
-                            <h2>Enviar Documento em OCR</h2>
-                            <p>Faça o upload de novos arquivos PDF não selecionáveis para tarjar.</p>
-                </div>
-                  </a>
-            </div>
-            </div>
-        </section>
+    <div class="col-lg-4 col-md-6">
+      <a href="./tarjar_ocr_pdf" class="text-decoration-none text-dark">
+        <div class="tool-card">
+          <div class="icon-container">
+            <i class="bi bi-cloud-upload-fill"></i>
+          </div>
+          <h2>Enviar Documento em OCR</h2>
+          <p>
+            Faça o upload de novos arquivos PDF não selecionáveis para tarjar.
+          </p>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
 {% endblock %}
-

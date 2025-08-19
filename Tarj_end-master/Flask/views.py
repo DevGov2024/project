@@ -17,6 +17,13 @@ from flask import jsonify, session
 from docx import Document
 from services.docx_service import encontrar_ocorrencias_docx, aplicar_tarjas_docx, atualizar_preview_docx
 from services.pdf_service import gerar_preview_pdf, aplicar_tarjas_pdf, atualizar_preview_pdf
+import io
+import uuid
+import tempfile
+from flask import Flask, render_template, request, send_file, redirect, url_for, flash
+
+
+
 # Habilita sessão para guardar dados temporários
 app.secret_key = "segredo-muito-seguro"
 
@@ -235,66 +242,116 @@ def ver_pdf_ocr():
     return send_file(caminho, mimetype='application/pdf')
 
 
+@app.route("/upload", methods=["POST"])
+def upload():
+    file = request.files.get("file")
+    tipos_selecionados = request.form.getlist("tipos")
+    if not file or file.filename == "":
+        flash("Selecione um PDF.")
+        return redirect(url_for("index"))
 
+    if not file.filename.lower().endswith(".pdf"):
+        flash("Apenas PDF é aceito.")
+        return redirect(url_for("index"))
 
-@app.route('/tarjar_pdf_grande', methods=['GET', 'POST'])
-def tarjar_pdf_grande():
-    if request.method == 'POST':
-        arquivo = request.files.get("arquivo")
-        if not arquivo:
-            return "Erro: Nenhum arquivo enviado.", 400
+    # salva no diretório temporário com nome único
+    temp_dir = tempfile.gettempdir()
+    unique = uuid.uuid4().hex
+    file_path = os.path.join(temp_dir, f"{unique}_{secure_filename(file.filename)}") if "secure_filename" in globals() else os.path.join(temp_dir, f"{unique}_{file.filename}")
+    file.save(file_path)
 
-        caminho = os.path.join("uploads", arquivo.filename)
-        arquivo.save(caminho)
+    # abre o PDF e escaneia por padrões
+    pdf = fitz.open(file_path)
+    achados = []
 
+    for page_num, page in enumerate(pdf, start=1):
+        text = page.get_text("text")
+        for tipo, regex in PADROES_SENSIVEIS.items():
+            for m in re.finditer(regex, text):
+                valor = m.group()
+                contexto_inicio = max(m.start() - 40, 0)
+                contexto_fim = min(m.end() + 40, len(text))
+                contexto = text[contexto_inicio:contexto_fim].replace("\n", " ")
+
+                achados.append({
+                    "pagina": page_num,
+                    "tipo": tipo,
+                    "valor": valor,
+                    "contexto": contexto
+                })
+
+    pdf.close()
+
+    # Renderiza tela de seleção (checkbox) com caminho do arquivo escondido
+    return render_template("resultados.html", achados=achados, file_path=file_path, nome_arquivo=os.path.basename(file_path))
+       
+# --------- Redact: aplica tarjas e retorna o PDF ----------
+@app.route("/redact", methods=["POST"])
+def redact():
+    file_path = request.form.get("file_path")
+    targets = request.form.getlist("targets")  # cada item: "pagina|tipo|valor"
+
+    if not file_path or not os.path.exists(file_path):
+        return "Arquivo não encontrado ou expirado. Refaça o upload.", 400
+
+    pdf = fitz.open(file_path)
+
+    # --- Agrupar valores por página para varredura única ---
+    pagina_valores = {}
+    for raw in targets:
         try:
-            doc = fitz.open(caminho)
-        except Exception as e:
-            return f"Erro ao abrir o PDF: {str(e)}", 500
+            pagina_str, tipo, valor = raw.split("|", 2)
+            page_index = int(pagina_str) - 1
+            if page_index not in pagina_valores:
+                pagina_valores[page_index] = []
+            pagina_valores[page_index].append(valor)
+        except Exception:
+            continue
 
-        total_paginas = doc.page_count
-        ocorrencias = []
+    # --- Processar página por página ---
+    for page_index, valores in pagina_valores.items():
+        if page_index < 0 or page_index >= len(pdf):
+            continue
 
-        # Apenas coleta os termos (sem carregar imagens pesadas)
-        for num, pagina in enumerate(doc):
-            texto = pagina.get_text("text")
-            for termo in ["CPF", "RG", "Nome"]:  # seus termos sensíveis
-                if termo.lower() in texto.lower():
-                    ocorrencias.append({
-                        "pagina": num + 1,
-                        "termo": termo
-                    })
+        page = pdf[page_index]
+        text = page.get_text("text")  # texto da página
 
-        return render_template(
-            "preview_pdf_grande.html",
-            nome_arquivo=arquivo.filename,
-            total_paginas=total_paginas,
-            ocorrencias=ocorrencias
-        )
+        rects_to_redact = []
 
-    return render_template("upload_pdf_grande.html")
+        # Para cada valor, procurar ocorrências no texto
+        for valor in valores:
+            # Procurar diretamente no texto
+            if valor in text:
+                # search_for retorna retângulos de coordenadas
+                found_rects = page.search_for(valor)
+                if found_rects:
+                    rects_to_redact.extend(found_rects)
+                # fallback: se não encontrar, podemos ignorar ou usar blocos
+                else:
+                    for b in page.get_text("blocks"):
+                        if valor in (b[4] or ""):
+                            rects_to_redact.append(fitz.Rect(b[0], b[1], b[2], b[3]))
+
+        # Criar todas as anotações de tarja de uma vez
+        for r in rects_to_redact:
+            page.add_redact_annot(r, fill=(0, 0, 0))
+
+        # Aplicar redactions uma única vez por página
+        page.apply_redactions()
+
+    # --- Salvar para download ---
+    output = io.BytesIO()
+    pdf.save(output)
+    pdf.close()
+    output.seek(0)
+
+    # opcional: remover arquivo temporário original
+    # os.remove(file_path)
+
+    return send_file(output, as_attachment=True, download_name="redacted.pdf", mimetype="application/pdf")
 
 
-
-
-@app.route('/aplicar_tarjas_pdf_grande', methods=['POST'])
-def aplicar_tarjas_pdf_grande():
-    nome_arquivo = request.form.get("arquivo")
-    caminho = os.path.join("uploads", nome_arquivo)
-
-    try:
-        doc = fitz.open(caminho)
-        for pagina in doc:
-            for termo in ["CPF", "RG", "Nome"]:
-                areas = pagina.search_for(termo)
-                for area in areas:
-                    pagina.add_redact_annot(area, fill=(0,0,0))
-            pagina.apply_redactions()
-
-        saida = os.path.join("outputs", f"tarjado_{nome_arquivo}")
-        doc.save(saida, deflate=True)
-        doc.close()
-
-        return f"PDF grande processado com sucesso! Arquivo salvo em {saida}"
-    except Exception as e:
-        return f"Erro ao aplicar tarjas: {str(e)}", 500
+# Utilitário mínimo se quiser nome seguro (evita caracteres estranhos)
+def secure_filename(name: str) -> str:
+    keep = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
+    return "".join(c if c in keep else "_" for c in name)

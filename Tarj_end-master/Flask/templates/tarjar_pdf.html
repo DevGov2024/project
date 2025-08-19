@@ -4,7 +4,6 @@
 
 {% block content %}
 
-
 <div class="row justify-content-center">
   <section class="col-md-8">
     <div class="bg-white p-4 rounded-3 shadow-sm text-orange">
@@ -29,15 +28,7 @@
               <input type="checkbox" name="usar_spacy" value="1">
               Detecção Avançada (spaCy)
             </label>
-
-           
-          </div>
-          <div>
-          <label>
-            <input type="checkbox" name="usar_ocr" value="1">
-            Usar OCR se o PDF for escaneado
-          </label>
-          </div>
+          </div>        
           {% for chave in padroes %}
           <div class="form-check">
             <input class="form-check-input item-checkbox" type="checkbox" name="tipos" value="{{ chave }}"
