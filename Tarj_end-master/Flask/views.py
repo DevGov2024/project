@@ -17,6 +17,15 @@ import pytesseract
 from pyzbar.pyzbar import decode
 from PIL import Image
 from PIL import Image, ImageDraw
+import fitz  # PyMuPDF
+
+# pyzbar (ZBar). Se falhar, loga e segue sem QR.
+try:
+    from pyzbar.pyzbar import decode as zbar_decode
+    _ZBAR_OK = True
+except Exception as _e:
+    print("DEBUG pyzbar import falhou:", _e)
+    _ZBAR_OK = False
 
 from regex_patterns import PADROES_SENSIVEIS
 
@@ -47,7 +56,6 @@ def copiar_e_tarjar(original_doc, padroes):
     return novo_doc
 
 # ----------------------------------------------------------------------------------- Padrões para DOCX ----------------------------------------------------------------------------------
-
 @app.route('/tarjar_docx', methods=['GET', 'POST'])
 def tarjar_docx_preview():
     if request.method == 'POST':
@@ -163,7 +171,6 @@ def aplicar_tarjas_docx():
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
 
-
 @app.route("/atualizar_preview_docx", methods=["POST"])
 def atualizar_preview_docx():
     try:
@@ -212,12 +219,12 @@ def atualizar_preview_docx():
         return jsonify({"erro": f"Erro no servidor: {str(e)}"}), 500
 
 # ----------------------------------------------------------------------------------- Padrões para PDF ----------------------------------------------------------------------------------
-
 @app.route('/tarjar_pdf', methods=['GET', 'POST'])
 def tarjar_pdf():
     if request.method == 'POST':
         arquivo = request.files.get('pdffile')
-        tipos_selecionados = request.form.getlist('tipos')  
+        tipos_selecionados = request.form.getlist('tipos')  # incluir 'qrcode' no front-end
+        print("DEBUG tipos_selecionados:", tipos_selecionados)
 
         if not arquivo or not arquivo.filename.endswith('.pdf'):
             return "Arquivo inválido. Envie um .pdf.", 400
@@ -234,6 +241,7 @@ def tarjar_pdf():
             pagina = doc[pagina_num]
             texto = pagina.get_text("text")
 
+            # EXISTENTE: detecção por regex / texto
             for tipo, regex in padroes_filtrados.items():
                 for m in re.finditer(regex, texto):
                     termo = m.group()
@@ -250,7 +258,38 @@ def tarjar_pdf():
                     for area in areas:
                         redactions_por_pagina.setdefault(pagina_num, []).append(area)
 
-        # Aplicar redactions (apenas para visualização)
+            # NOVO: detecção de QR Codes (se marcado no front)
+            if 'qrcode' in tipos_selecionados:
+                qrs = detectar_qrcodes_pagina(pagina, pagina_num, dpi=200)
+                print(f"DEBUG página {pagina_num+1}: detectados {len(qrs)} QR(s)")
+                for qr in qrs:
+                    print("DEBUG bbox:", qr.get("bbox"))
+                    ocorrencias.append(qr)
+                    rect = fitz.Rect(*qr['bbox'])
+                    redactions_por_pagina.setdefault(pagina_num, []).append(rect)
+
+            # OPCIONAL: modo teste (pinta um retângulo fixo no canto inf. direito)
+            if 'qrcode_fixed' in tipos_selecionados:
+                try:
+                    pagina_rect = pagina.rect
+                    largura = 128  # ~45mm
+                    altura  = 128
+                    x1 = pagina_rect.x1 - 30  # margem direita 30pt
+                    y1 = 30                    # margem inferior 30pt
+                    rect_fix = fitz.Rect(x1 - largura, y1, x1, y1 + altura)
+                    redactions_por_pagina.setdefault(pagina_num, []).append(rect_fix)
+                    ocorrencias.append({
+                        "id": f"qrf_{pagina_num}_0",
+                        "tipo": "qrcode_fixed",
+                        "texto": "QR fixo (teste)",
+                        "pagina": pagina_num,
+                        "bbox": [rect_fix.x0, rect_fix.y0, rect_fix.x1, rect_fix.y1]
+                    })
+                    print(f"DEBUG aplicado qrcode_fixed na página {pagina_num+1}")
+                except Exception as e:
+                    print("DEBUG erro no qrcode_fixed:", e)
+
+        # Aplicar redactions (apenas para visualização/preview)
         for pagina_idx, areas in redactions_por_pagina.items():
             pagina = doc[pagina_idx]
             for area in areas:
@@ -265,7 +304,7 @@ def tarjar_pdf():
 
         pdf_b64 = base64.b64encode(mem_file.read()).decode('utf-8')
 
-        # Ainda salvamos o original temporariamente, caso o usuário queira aplicar tarjas reais depois
+        # Salvar original temp (para aplicar tarjas reais depois)
         temp_path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf").name
         with open(temp_path, 'wb') as f:
             f.write(pdf_bytes)
@@ -276,7 +315,6 @@ def tarjar_pdf():
         return render_template("preview_pdf.html", ocorrencias=ocorrencias, pdf_data=pdf_b64)
 
     return render_template('tarjar_pdf.html', padroes=PADROES_SENSIVEIS.keys())
-    
 
 @app.route('/aplicar_tarjas_pdf', methods=['POST'])
 def aplicar_tarjas_pdf():
@@ -285,6 +323,10 @@ def aplicar_tarjas_pdf():
 
     trechos_manuais_raw = request.form.get('tarjas_manualmente_adicionadas', '')
     trechos_manuais = [t.strip() for t in trechos_manuais_raw.split('|') if t.strip()]
+
+    # NOVO: flags vindas do preview
+    qrcode_preview = request.form.get('qrcode_preview', '0') == '1'
+    qrcode_fixed_preview = request.form.get('qrcode_fixed_preview', '0') == '1'
 
     caminho = session.get('pdf_path')
     ocorrencias = session.get('pdf_ocorrencias', [])
@@ -295,18 +337,24 @@ def aplicar_tarjas_pdf():
     doc = fitz.open(caminho)
     redactions_por_pagina = {}
 
+    # 1) Ocorrências automáticas selecionadas (texto / bbox)
     for item in ocorrencias:
         if item['id'] in selecionados:
             pagina_idx = item['pagina']
-            termo = item['texto']
             pagina = doc[pagina_idx]
+            if 'bbox' in item:
+                area = fitz.Rect(*item['bbox'])
+                if not (preservar_logo and area.y0 < 100):
+                    redactions_por_pagina.setdefault(pagina_idx, []).append(area)
+            else:
+                termo = item['texto']
+                areas = pagina.search_for(termo)
+                for area in areas:
+                    if preservar_logo and area.y0 < 100:
+                        continue
+                    redactions_por_pagina.setdefault(pagina_idx, []).append(area)
 
-            areas = pagina.search_for(termo)
-            for area in areas:
-                if preservar_logo and area.y0 < 100:
-                    continue
-                redactions_por_pagina.setdefault(pagina_idx, []).append(area)
-
+    # 2) Tarjas manuais por texto
     if trechos_manuais:
         for num_pagina in range(len(doc)):
             pagina = doc[num_pagina]
@@ -319,6 +367,37 @@ def aplicar_tarjas_pdf():
                             continue
                         redactions_por_pagina.setdefault(num_pagina, []).append(area)
 
+    # 3) NOVO: QR Code (detecção) conforme o estado do preview
+    if qrcode_preview:
+        for num_pagina in range(len(doc)):
+            pagina = doc[num_pagina]
+            try:
+                qrs = detectar_qrcodes_pagina(pagina, num_pagina, dpi=200)
+            except Exception as e:
+                qrs = []
+                print("DEBUG detectar_qrcodes_pagina falhou no apply:", e)
+            for qr in qrs:
+                area = fitz.Rect(*qr['bbox'])
+                if not (preservar_logo and area.y0 < 100):
+                    redactions_por_pagina.setdefault(num_pagina, []).append(area)
+
+    # 4) NOVO: QR fixo (teste) conforme o estado do preview
+    if qrcode_fixed_preview:
+        for num_pagina in range(len(doc)):
+            pagina = doc[num_pagina]
+            try:
+                pagina_rect = pagina.rect
+                largura = 128
+                altura = 128
+                x1 = pagina_rect.x1 - 30
+                y1 = 30
+                rect_fix = fitz.Rect(x1 - largura, y1, x1, y1 + altura)
+                if not (preservar_logo and rect_fix.y0 < 100):
+                    redactions_por_pagina.setdefault(num_pagina, []).append(rect_fix)
+            except Exception as e:
+                print("DEBUG qrcode_fixed apply falhou:", e)
+
+    # Aplicar e retornar
     for pagina_idx, areas in redactions_por_pagina.items():
         pagina = doc[pagina_idx]
         for area in areas:
@@ -329,9 +408,6 @@ def aplicar_tarjas_pdf():
     doc.save(mem_file)
     mem_file.seek(0)
     doc.close()
-
-    # NÃO remover o arquivo temporário aqui para evitar erro
-    # os.remove(caminho)
 
     return send_file(
         mem_file,
@@ -374,6 +450,10 @@ def atualizar_preview_pdf():
         selecionados = data.get("selecionados", [])
         trechos_manuais = data.get("manuais", [])
 
+        # NOVO: flags vindas do preview
+        qrcode = bool(data.get("qrcode", False))
+        qrcode_fixed = bool(data.get("qrcode_fixed", False))
+
         caminho = session.get('pdf_path')
         ocorrencias = session.get('pdf_ocorrencias', [])
 
@@ -383,27 +463,59 @@ def atualizar_preview_pdf():
         doc = fitz.open(caminho)
         redactions_por_pagina = {}
 
-        # Aplica tarjas automáticas selecionadas
+        # 1) Ocorrências automáticas selecionadas (texto e itens com bbox)
         for item in ocorrencias:
             if item['id'] in selecionados:
                 pagina_idx = item['pagina']
-                termo = item['texto']
                 pagina = doc[pagina_idx]
-                areas = pagina.search_for(termo)
-                for area in areas:
+                if 'bbox' in item:
+                    area = fitz.Rect(*item['bbox'])
                     redactions_por_pagina.setdefault(pagina_idx, []).append(area)
+                else:
+                    termo = item['texto']
+                    areas = pagina.search_for(termo)
+                    for area in areas:
+                        redactions_por_pagina.setdefault(pagina_idx, []).append(area)
 
-        # Aplica tarjas manuais
+        # 2) Tarjas manuais por texto
         for num_pagina in range(len(doc)):
             pagina = doc[num_pagina]
             texto_pagina = pagina.get_text()
             for trecho in trechos_manuais:
-                if trecho in texto_pagina:
+                if trecho and trecho in texto_pagina:
                     areas = pagina.search_for(trecho)
                     for area in areas:
                         redactions_por_pagina.setdefault(num_pagina, []).append(area)
 
-        # Aplica as redactions para visualização
+        # 3) NOVO: QR Code na PRÉ-VISUALIZAÇÃO
+        if qrcode:
+            for num_pagina in range(len(doc)):
+                pagina = doc[num_pagina]
+                try:
+                    qrs = detectar_qrcodes_pagina(pagina, num_pagina, dpi=200)
+                except Exception as e:
+                    qrs = []
+                    print("DEBUG detectar_qrcodes_pagina falhou no preview:", e)
+                for qr in qrs:
+                    area = fitz.Rect(*qr['bbox'])
+                    redactions_por_pagina.setdefault(num_pagina, []).append(area)
+
+        # 4) NOVO: QR fixo (teste) na PRÉ-VISUALIZAÇÃO
+        if qrcode_fixed:
+            for num_pagina in range(len(doc)):
+                pagina = doc[num_pagina]
+                try:
+                    pagina_rect = pagina.rect
+                    largura = 128  # ~45 mm
+                    altura = 128
+                    x1 = pagina_rect.x1 - 30  # margem direita 30pt
+                    y1 = 30                    # margem inferior 30pt
+                    rect_fix = fitz.Rect(x1 - largura, y1, x1, y1 + altura)
+                    redactions_por_pagina.setdefault(num_pagina, []).append(rect_fix)
+                except Exception as e:
+                    print("DEBUG qrcode_fixed preview falhou:", e)
+
+        # Aplicar redactions e retornar base64
         for pagina_idx, areas in redactions_por_pagina.items():
             pagina = doc[pagina_idx]
             for area in areas:
@@ -416,7 +528,6 @@ def atualizar_preview_pdf():
         doc.close()
 
         pdf_b64 = base64.b64encode(mem_file.read()).decode('utf-8')
-
         return jsonify({"pdf_data": pdf_b64})
 
     except Exception as e:
@@ -430,9 +541,7 @@ def download_pdf_tarjado():
 
     return send_file(path, as_attachment=True, download_name="documento_tarjado.pdf", mimetype="application/pdf")
 
-
 # ----------------------------------------------------------------------------------- Padrões para PDF OCR ----------------------------------------------------------------------------------
-
 @app.route('/tarjar_ocr_pdf', methods=['GET', 'POST'])
 def tarjar_ocr_pdf():
     if request.method == 'POST':
@@ -599,7 +708,6 @@ def aplicar_tarjas_ocr_pdf():
         mimetype="application/pdf"
     )
 
-
 @app.route('/atualizar_preview_ocr_pdf', methods=['POST'])
 def atualizar_preview_ocr_pdf():
     try:
@@ -696,7 +804,6 @@ def download_pdf_ocr():
 
     return send_file(caminho, as_attachment=True, download_name="pdf_tarjado_ocr.pdf")
 
-
 @app.route('/ver_pdf_ocr')
 def ver_pdf_ocr():
     caminho = session.get('ocr_pdf_path')
@@ -704,3 +811,60 @@ def ver_pdf_ocr():
         return "Arquivo não encontrado.", 404
 
     return send_file(caminho, mimetype='application/pdf')
+
+# ----------------------------------------------------------------------------------- Padrões para qrCode ----------------------------------------------------------------------------------
+def detectar_qrcodes_pagina(pagina, pagina_num, dpi=200):
+    """
+    Renderiza a página em imagem e usa pyzbar/ZBar para localizar QR Codes.
+    Retorna lista de dicts com id, tipo='qrcode', pagina e bbox [x0, y0, x1, y1].
+    """
+    if not _ZBAR_OK:
+        print("DEBUG ZBar não disponível (_ZBAR_OK=False).")
+        return []
+
+    # Render da página -> imagem PIL
+    try:
+        pix = pagina.get_pixmap(dpi=dpi, alpha=False)
+        mode = "RGB" if not pix.alpha else "RGBA"
+        img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
+    except Exception as e:
+        print("DEBUG erro ao renderizar página:", e)
+        return []
+
+    # Detecta com ZBar
+    try:
+        resultados = zbar_decode(img)
+    except Exception as e:
+        print("DEBUG zbar_decode falhou (falta DLL do ZBar?):", e)
+        return []
+
+    if not resultados:
+        return []
+
+    # pixels -> pontos PDF (1 pt = 1/72in; render em dpi)
+    escala = dpi / 72.0
+    encontrados = []
+    for i, r in enumerate(resultados):
+        if getattr(r, "type", "") != "QRCODE":
+            continue
+
+        left, top, w, h = r.rect.left, r.rect.top, r.rect.width, r.rect.height
+        x0 = left / escala
+        y0 = top / escala
+        x1 = (left + w) / escala
+        y1 = (top + h) / escala
+
+        texto_lido = ""
+        try:
+            texto_lido = (r.data or b"").decode("utf-8", "ignore")
+        except Exception:
+            pass
+
+        encontrados.append({
+            "id": f"qr_{pagina_num}_{i}",
+            "tipo": "qrcode",
+            "texto": texto_lido if texto_lido else "QR Code",
+            "pagina": pagina_num,
+            "bbox": [x0, y0, x1, y1],
+        })
+    return encontrados

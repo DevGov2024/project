@@ -17,6 +17,8 @@
 
             <form method="post" action="{{ url_for('aplicar_tarjas_pdf') }}">
                 <input type="hidden" name="tarjas_manualmente_adicionadas" id="manualTarjasHidden">
+                <input type="hidden" name="qrcode_preview" id="qrcodePreviewHidden" value="0">
+                <input type="hidden" name="qrcode_fixed_preview" id="qrcodeFixedPreviewHidden" value="0">
 
                 <div class="mb-3">
                     <label for="trechoManual" class="form-label">Inserir trecho manual:</label>
@@ -28,6 +30,12 @@
                 </div>
 
                 <ul id="listaTarjas" class="list-group mb-4"></ul>
+                <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="toggleQrPreview">
+                    <label class="form-check-label" for="toggleQrPreview">Ocultar QR Code</label>
+                </div>
+                </div>
 
                 <h4 class="mb-3">Dados encontrados:</h4>
                 <div class="mb-4">
@@ -55,26 +63,28 @@
                     <i class="bi bi-x-circle"></i> Cancelar Solicitação
                     </a>
                 </div>
-
             </form>
         </div>
     </section>
 </div>
 
 <script>
+    
     let tarjasManuais = [];
 
+    const $ = (id) => document.getElementById(id);
+
     function adicionarTarjaManual() {
-        const input = document.getElementById("trechoManual");
-        const valor = input.value.trim();
+        const input = $("trechoManual");
+        const valor = (input?.value || "").trim();
         if (valor.length === 0) {
             alert("Insira um trecho antes de adicionar.");
             return;
         }
-        tarjasManuais.push(valor);
-        document.getElementById("manualTarjasHidden").value = tarjasManuais.join("|");
 
-        // Atualiza lista visual
+        tarjasManuais.push(valor);
+        $("manualTarjasHidden").value = tarjasManuais.join("|");
+
         const li = document.createElement("li");
         li.className = "list-group-item d-flex justify-content-between align-items-center";
         li.textContent = valor;
@@ -84,39 +94,81 @@
         btnRemover.className = "btn btn-sm btn-outline-danger ms-2";
         btnRemover.onclick = function () {
             tarjasManuais = tarjasManuais.filter(t => t !== valor);
-            document.getElementById("manualTarjasHidden").value = tarjasManuais.join("|");
+            $("manualTarjasHidden").value = tarjasManuais.join("|");
             li.remove();
             atualizarPreviewPDF();
         };
 
         li.appendChild(btnRemover);
-        document.getElementById("listaTarjas").appendChild(li);
+        $("listaTarjas").appendChild(li);
 
         input.value = "";
-
         atualizarPreviewPDF();
     }
 
-    document.getElementById("checkAll").addEventListener("change", function () {
-        const checkboxes = document.querySelectorAll(".item-checkbox");
-        checkboxes.forEach(cb => cb.checked = this.checked);
-        atualizarPreviewPDF();
-    });
+    // ========== Selecionar/Desmarcar todos ==========
+    const checkAllEl = $("checkAll");
+    if (checkAllEl) {
+        checkAllEl.addEventListener("change", function () {
+            document.querySelectorAll(".item-checkbox").forEach(cb => cb.checked = this.checked);
+            atualizarPreviewPDF();
+        });
+    }
 
     document.querySelectorAll(".item-checkbox").forEach(cb => {
         cb.addEventListener("change", atualizarPreviewPDF);
     });
 
+    // ========== Toggles de preview para QR ==========
+    // Estes elementos são opcionais no HTML:
+    //  - <input type="checkbox" id="toggleQrPreview">
+    //  - <input type="checkbox" id="toggleQrFixed">
+    //  - <input type="hidden" name="qrcode_preview" id="qrcodePreviewHidden" value="0">
+    //  - <input type="hidden" name="qrcode_fixed_preview" id="qrcodeFixedPreviewHidden" value="0">
+    const toggleQrPreview = $("toggleQrPreview");
+    const toggleQrFixed   = $("toggleQrFixed");
+
+    function syncHiddenFromToggles() {
+        const qrcode = !!(toggleQrPreview && toggleQrPreview.checked);
+        const qrcode_fixed = !!(toggleQrFixed && toggleQrFixed.checked);
+
+        const hPrev = $("qrcodePreviewHidden");
+        const hFix  = $("qrcodeFixedPreviewHidden");
+        if (hPrev) hPrev.value = qrcode ? "1" : "0";
+        if (hFix)  hFix.value  = qrcode_fixed ? "1" : "0";
+    }
+
+    if (toggleQrPreview) {
+        toggleQrPreview.addEventListener("change", () => {
+            syncHiddenFromToggles();
+            atualizarPreviewPDF();
+        });
+    }
+    if (toggleQrFixed) {
+        toggleQrFixed.addEventListener("change", () => {
+            syncHiddenFromToggles();
+            atualizarPreviewPDF();
+        });
+    }
+
+    // ========== Atualizar Preview ==========
     async function atualizarPreviewPDF() {
         const selecionados = Array.from(document.querySelectorAll('input[name="selecionados"]:checked')).map(i => i.value);
-        const manuaisRaw = document.getElementById('manualTarjasHidden').value;
+        const manuaisRaw = $("manualTarjasHidden") ? $("manualTarjasHidden").value : "";
         const manuais = manuaisRaw.split('|').map(t => t.trim()).filter(t => t.length > 0);
+
+        // Lê os toggles (se existirem)
+        const qrcode = !!(toggleQrPreview && toggleQrPreview.checked);
+        const qrcode_fixed = !!(toggleQrFixed && toggleQrFixed.checked);
+
+        // Mantém os hidden sincronizados para o POST final (download)
+        syncHiddenFromToggles();
 
         try {
             const resp = await fetch('/atualizar_preview_pdf', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({selecionados, manuais})
+                body: JSON.stringify({ selecionados, manuais, qrcode, qrcode_fixed })
             });
 
             if (!resp.ok) {
@@ -125,23 +177,26 @@
             }
 
             const data = await resp.json();
-
             if (data.erro) {
                 alert('Erro ao atualizar preview: ' + data.erro);
                 return;
             }
 
-            // Atualiza o iframe com o PDF base64 retornado
-            document.getElementById('pdfIframe').src = 'data:application/pdf;base64,' + data.pdf_data;
-
+            const iframe = $("pdfIframe");
+            if (iframe) {
+                iframe.src = 'data:application/pdf;base64,' + data.pdf_data;
+            }
         } catch (e) {
             alert('Erro inesperado ao atualizar preview');
             console.error(e);
         }
     }
 
-    // Atualiza preview ao carregar a página
-    window.addEventListener('load', atualizarPreviewPDF);
-
+    // ========== Inicialização ==========
+    window.addEventListener('load', () => {
+        syncHiddenFromToggles();  // garante que os hidden reflitam os toggles ao entrar
+        atualizarPreviewPDF();
+    });
 </script>
+
 {% endblock %}
